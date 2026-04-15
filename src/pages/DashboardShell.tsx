@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
   type ChangeEvent,
   type MouseEvent,
@@ -21,7 +22,7 @@ import {
 } from 'lucide-react'
 import { jsPDF } from 'jspdf'
 import { localeOptions, useI18n } from '../lib/i18n'
-import { Link, NavLink, useParams } from 'react-router-dom'
+import { Link, NavLink, useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import './DashboardShell.css'
 
@@ -665,6 +666,7 @@ function VehiculesPage({
   onEditVehicle: (vehicleId: string) => Promise<void>
   onDeleteVehicle: (vehicleId: string) => Promise<void>
 }) {
+  const [searchParams] = useSearchParams()
   const [sessionUserId, setSessionUserId] = useState<string | null>(null)
   const [vehiclePhotos, setVehiclePhotos] = useState<Record<string, string>>({})
   const [vehicleGalleries, setVehicleGalleries] = useState<
@@ -676,6 +678,11 @@ function VehiculesPage({
   const [feedback, setFeedback] = useState('')
   const [error, setError] = useState('')
   const [vehicleTab, setVehicleTab] = useState<'fleet' | 'revisions'>('fleet')
+  useEffect(() => {
+    if (searchParams.get('tab') === 'revisions') {
+      setVehicleTab('revisions')
+    }
+  }, [searchParams])
   const [revisionForm, setRevisionForm] = useState({
     vehicle_id: '',
     due_date: '',
@@ -1864,6 +1871,8 @@ export function DashboardShell() {
   const [savingModal, setSavingModal] = useState(false)
   const [modalError, setModalError] = useState('')
   const [loadError, setLoadError] = useState('')
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const notificationsRef = useRef<HTMLDivElement>(null)
   const currentIndex = Math.max(0, menuMeta.findIndex((item) => item.key === section))
   const refreshAppData = async () => {
     setLoadError('')
@@ -1978,6 +1987,24 @@ export function DashboardShell() {
     const stored = localStorage.getItem('jlt-test-mode')
     if (stored === 'false') setTestModeEnabled(false)
   }, [])
+
+  useEffect(() => {
+    if (!notificationsOpen) return
+    const onDocPointerDown = (e: PointerEvent) => {
+      if (notificationsRef.current && !notificationsRef.current.contains(e.target as Node)) {
+        setNotificationsOpen(false)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNotificationsOpen(false)
+    }
+    document.addEventListener('pointerdown', onDocPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onDocPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [notificationsOpen])
 
   const onGlobalInvoiceLogoChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -2574,6 +2601,21 @@ export function DashboardShell() {
     return diffDays >= 0 && diffDays <= 7
   }).length
   const notificationCount = returnsTodayCount + revisionsSoonCount
+  const vehicleByIdNotif = new Map(vehiclesData.map((v) => [v.id, v]))
+  const returnsTodayNotifications = contractsData.filter(
+    (contract) =>
+      contract.end_at?.slice(0, 10) === todayIso &&
+      (contract.status === 'active' || contract.status === 'draft'),
+  )
+  const revisionsSoonNotifications = revisionsData
+    .filter((revision) => revision.status !== 'done')
+    .filter((revision) => {
+      const due = revision.due_date?.slice(0, 10)
+      if (!due) return false
+      const diffDays = Math.ceil((+new Date(due) - +new Date(todayIso)) / (1000 * 60 * 60 * 24))
+      return diffDays >= 0 && diffDays <= 7
+    })
+    .slice(0, 8)
   return (
     <div className="dashboard-layout">
       <aside className="sidebar">
@@ -2650,10 +2692,69 @@ export function DashboardShell() {
             </div>
           </div>
           <div className="top-actions">
-            <button type="button" className="ghost-btn">
-              <Bell size={14} />
-              {notificationCount > 0 && <span className="notif-badge">{notificationCount}</span>}
-            </button>
+            <div className="notifications-wrap" ref={notificationsRef}>
+              <button
+                type="button"
+                className="ghost-btn"
+                aria-expanded={notificationsOpen}
+                aria-haspopup="dialog"
+                aria-label={app.notificationsTitle}
+                onClick={() => setNotificationsOpen((open) => !open)}
+              >
+                <Bell size={14} />
+                {notificationCount > 0 && <span className="notif-badge">{notificationCount}</span>}
+              </button>
+              {notificationsOpen && (
+                <div className="notifications-panel" role="dialog" aria-label={app.notificationsTitle}>
+                  <h4>{app.notificationsTitle}</h4>
+                  {returnsTodayNotifications.length === 0 && revisionsSoonNotifications.length === 0 ? (
+                    <p className="notifications-empty">{app.noNotifications}</p>
+                  ) : (
+                    <>
+                      {returnsTodayNotifications.length > 0 && (
+                        <>
+                          <p className="notif-section-label">{app.returnToday}</p>
+                          <ul className="notifications-list">
+                            {returnsTodayNotifications.map((contract) => {
+                              const vehicle = vehicleByIdNotif.get(contract.vehicle_id)
+                              return (
+                                <li key={`bell-ret-${contract.id}`}>
+                                  {vehicle ? `${vehicle.brand} ${vehicle.model}` : contract.vehicle_id}
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        </>
+                      )}
+                      {revisionsSoonNotifications.length > 0 && (
+                        <>
+                          <p className="notif-section-label">{app.revisionsTab}</p>
+                          <ul className="notifications-list">
+                            {revisionsSoonNotifications.map((revision) => {
+                              const vehicle = vehicleByIdNotif.get(revision.vehicle_id)
+                              return (
+                                <li key={`bell-rev-${revision.id}`}>
+                                  {revision.due_date?.slice(0, 10)} —{' '}
+                                  {vehicle ? `${vehicle.brand} ${vehicle.model}` : revision.vehicle_id}
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        </>
+                      )}
+                      <div className="notif-actions">
+                        <Link to="/app/planning" onClick={() => setNotificationsOpen(false)}>
+                          {app.menu[4]}
+                        </Link>
+                        <Link to="/app/vehicules?tab=revisions" onClick={() => setNotificationsOpen(false)}>
+                          {app.revisionsTab}
+                        </Link>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
             <button type="button" className="ghost-btn" onClick={() => setInvoiceProfileOpen(true)}>
               {app.invoiceProfile}
             </button>
