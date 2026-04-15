@@ -25,6 +25,9 @@ import { Link, NavLink, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import './DashboardShell.css'
 
+/** Démo publique : connexion anonyme + accès sans abonnement (voir VITE_PUBLIC_DEMO_MODE). */
+const isPublicDemoMode = import.meta.env.VITE_PUBLIC_DEMO_MODE === 'true'
+
 const menuMeta = [
   { key: 'dashboard', icon: LayoutDashboard },
   { key: 'vehicules', icon: Car },
@@ -736,12 +739,27 @@ function VehiculesPage({
   })
 
   useEffect(() => {
+    let mounted = true
+    const syncSession = (userId: string | null) => {
+      if (mounted) setSessionUserId(userId)
+    }
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      syncSession(session?.user?.id ?? null)
+    })
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      syncSession(session?.user?.id ?? null)
+    })
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
     const loadPhotos = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-      const userId = session?.user?.id ?? null
-      setSessionUserId(userId)
+      const userId = sessionUserId
       if (!userId) return
 
       const { data: rows, error: rowsError } = await supabase
@@ -809,7 +827,7 @@ function VehiculesPage({
     }
 
     void loadPhotos()
-  }, [])
+  }, [sessionUserId])
 
   useEffect(() => {
     const nextDrafts: Record<string, string> = {}
@@ -1909,7 +1927,32 @@ export function DashboardShell() {
     if (firstError) setLoadError(firstError)
   }
   useEffect(() => {
-    void refreshAppData()
+    let cancelled = false
+    const bootstrap = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      if (!cancelled && !session?.user && isPublicDemoMode) {
+        const { error: anonError } = await supabase.auth.signInAnonymously()
+        if (anonError && !cancelled) {
+          setLoadError(anonError.message)
+          return
+        }
+      }
+      if (!cancelled) await refreshAppData()
+    }
+    void bootstrap()
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+        void refreshAppData()
+      }
+    })
+    return () => {
+      cancelled = true
+      subscription.unsubscribe()
+    }
   }, [])
   useEffect(() => {
     const stored = localStorage.getItem('jlt-invoice-profile')
@@ -1928,6 +1971,10 @@ export function DashboardShell() {
     }
   }, [])
   useEffect(() => {
+    if (isPublicDemoMode) {
+      setTestModeEnabled(true)
+      return
+    }
     const stored = localStorage.getItem('jlt-test-mode')
     if (stored === 'false') setTestModeEnabled(false)
   }, [])
@@ -2571,6 +2618,21 @@ export function DashboardShell() {
       </aside>
 
       <section className="dashboard-main">
+        {isPublicDemoMode && (
+          <div
+            className="demo-mode-banner"
+            role="status"
+            style={{
+              padding: '10px 20px',
+              fontSize: '0.85rem',
+              background: '#ecfdf5',
+              borderBottom: '1px solid #a7f3d0',
+              color: '#065f46',
+            }}
+          >
+            <strong>{app.billingTestModeTitle}</strong> — {app.billingTestModeDesc}
+          </div>
+        )}
         <header className="dashboard-top">
           <div>
             <h1>{app.menu[currentIndex] || app.menu[0]}</h1>
