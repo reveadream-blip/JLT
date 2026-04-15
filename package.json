@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "tailwind-init": "tailwindcss init -p"
+    "tailwind-init": "tailwindcss init -p",
+    "git:sync": "node scripts/push-github.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.0",
