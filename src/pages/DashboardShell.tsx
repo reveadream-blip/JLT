@@ -775,6 +775,31 @@ function VehiculesPage({
         .includes(q)
     return typeOk && statusOk && searchOk
   })
+  const sortedRevisions = [...revisionsData].sort((a, b) =>
+    (a.due_date || '').localeCompare(b.due_date || ''),
+  )
+  const revisionStats = sortedRevisions.reduce(
+    (acc, revision) => {
+      if (revision.status === 'done') acc.done += 1
+      else if (revision.status === 'overdue') acc.overdue += 1
+      else acc.scheduled += 1
+      return acc
+    },
+    { scheduled: 0, done: 0, overdue: 0 },
+  )
+  const formatRevisionDate = (value: string) => value?.slice(0, 10) || '-'
+  const revisionToneClass = (status: 'scheduled' | 'done' | 'overdue') =>
+    status === 'done'
+      ? 'is-done'
+      : status === 'overdue'
+        ? 'is-overdue'
+        : 'is-scheduled'
+  const revisionStatusLabel = (status: 'scheduled' | 'done' | 'overdue') =>
+    status === 'done'
+      ? app.revisionStatusDone
+      : status === 'overdue'
+        ? app.revisionStatusOverdue
+        : app.revisionStatusScheduled
 
   useEffect(() => {
     let mounted = true
@@ -988,78 +1013,111 @@ function VehiculesPage({
 
   return (
     <div className="grid-cards">
-      <div className="chips">
-        <button
-          type="button"
-          className={vehicleTab === 'fleet' ? 'active' : ''}
-          onClick={() => setVehicleTab('fleet')}
-        >
-          {app.menu[1]}
-        </button>
-        <button
-          type="button"
-          className={vehicleTab === 'revisions' ? 'active' : ''}
-          onClick={() => setVehicleTab('revisions')}
-        >
-          {app.revisionsTab}
-        </button>
-      </div>
-      {vehicleTab === 'revisions' && (
-        <article className="list-item" style={{ gridColumn: '1 / -1' }}>
-          <h4>{app.scheduleRevision}</h4>
-          <select
-            value={revisionForm.vehicle_id}
-            onChange={(event) =>
-              setRevisionForm((prev) => ({ ...prev, vehicle_id: event.target.value }))
-            }
-          >
-            <option value="">{app.vehicleField}</option>
-            {vehiclesData.map((vehicle) => (
-              <option key={vehicle.id} value={vehicle.id}>
-                {vehicle.brand} {vehicle.model}
-              </option>
-            ))}
-          </select>
-          <input
-            type="date"
-            value={revisionForm.due_date}
-            onChange={(event) =>
-              setRevisionForm((prev) => ({ ...prev, due_date: event.target.value }))
-            }
-          />
-          <input
-            value={revisionForm.note}
-            onChange={(event) => setRevisionForm((prev) => ({ ...prev, note: event.target.value }))}
-            placeholder={app.noteField}
-          />
+      <div className="vehicle-tab-header">
+        <div className="chips">
           <button
             type="button"
-            onClick={() =>
-              void (async () => {
-                if (!revisionForm.vehicle_id || !revisionForm.due_date) return
-                await onCreateRevision({
-                  vehicle_id: revisionForm.vehicle_id,
-                  due_date: revisionForm.due_date,
-                  status: 'scheduled',
-                  note: revisionForm.note,
-                })
-                setRevisionForm({ vehicle_id: '', due_date: '', note: '' })
-              })()
-            }
+            className={vehicleTab === 'fleet' ? 'active' : ''}
+            onClick={() => setVehicleTab('fleet')}
           >
-            {app.create}
+            {app.menu[1]}
           </button>
-          <div className="list" style={{ marginTop: '10px' }}>
-            {revisionsData.map((revision) => {
+          <button
+            type="button"
+            className={vehicleTab === 'revisions' ? 'active' : ''}
+            onClick={() => setVehicleTab('revisions')}
+          >
+            {app.revisionsTab}
+          </button>
+        </div>
+        <div className="vehicle-tab-kpis">
+          <p>
+            <strong>{filteredVehicles.length}</strong> {app.menu[1].toLowerCase()}
+          </p>
+          <p className="warn">
+            <strong>{revisionStats.overdue}</strong> {app.revisionStatusOverdue.toLowerCase()}
+          </p>
+        </div>
+      </div>
+      {vehicleTab === 'revisions' && (
+        <article className="vehicle-revisions-board">
+          <header className="vehicle-revisions-summary">
+            <div className="revision-stat">
+              <span>{app.revisionStatusScheduled}</span>
+              <strong>{revisionStats.scheduled}</strong>
+            </div>
+            <div className="revision-stat done">
+              <span>{app.revisionStatusDone}</span>
+              <strong>{revisionStats.done}</strong>
+            </div>
+            <div className="revision-stat overdue">
+              <span>{app.revisionStatusOverdue}</span>
+              <strong>{revisionStats.overdue}</strong>
+            </div>
+          </header>
+          <div className="revision-create-card">
+            <h4>{app.scheduleRevision}</h4>
+            <div className="revision-create-grid">
+              <select
+                value={revisionForm.vehicle_id}
+                onChange={(event) =>
+                  setRevisionForm((prev) => ({ ...prev, vehicle_id: event.target.value }))
+                }
+              >
+                <option value="">{app.vehicleField}</option>
+                {vehiclesData.map((vehicle) => (
+                  <option key={vehicle.id} value={vehicle.id}>
+                    {vehicle.brand} {vehicle.model}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="date"
+                value={revisionForm.due_date}
+                onChange={(event) =>
+                  setRevisionForm((prev) => ({ ...prev, due_date: event.target.value }))
+                }
+              />
+              <input
+                value={revisionForm.note}
+                onChange={(event) =>
+                  setRevisionForm((prev) => ({ ...prev, note: event.target.value }))
+                }
+                placeholder={app.noteField}
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  void (async () => {
+                    if (!revisionForm.vehicle_id || !revisionForm.due_date) return
+                    await onCreateRevision({
+                      vehicle_id: revisionForm.vehicle_id,
+                      due_date: revisionForm.due_date,
+                      status: 'scheduled',
+                      note: revisionForm.note,
+                    })
+                    setRevisionForm({ vehicle_id: '', due_date: '', note: '' })
+                  })()
+                }
+              >
+                {app.create}
+              </button>
+            </div>
+          </div>
+          <div className="list vehicle-revisions-list">
+            {sortedRevisions.map((revision) => {
               const vehicle = vehiclesData.find((v) => v.id === revision.vehicle_id)
               return (
-                <article key={revision.id} className="contract-row">
-                  <div>
+                <article key={revision.id} className="revision-card">
+                  <div className="revision-card-main">
+                    <span className={`revision-badge ${revisionToneClass(revision.status)}`}>
+                      {revisionStatusLabel(revision.status)}
+                    </span>
                     <h4>{vehicle ? `${vehicle.brand} ${vehicle.model}` : revision.vehicle_id}</h4>
-                    <p>{revision.due_date.slice(0, 10)}</p>
+                    <p>{formatRevisionDate(revision.due_date)}</p>
                     <p>{revision.note || '-'}</p>
                   </div>
-                  <div className="row-actions">
+                  <div className="row-actions revision-actions">
                     <select
                       value={revision.status}
                       onChange={(event) =>
@@ -1102,6 +1160,11 @@ function VehiculesPage({
             )}
           </div>
           <h4>{vehicle.name}</h4>
+          <div className="vehicle-specs">
+            {vehicle.specs.map((spec, index) => (
+              <span key={`${vehicle.id}-spec-${index}`}>{spec}</span>
+            ))}
+          </div>
           <div className="airtag-editor">
             <input
               value={airtagDrafts[vehicle.id] ?? ''}

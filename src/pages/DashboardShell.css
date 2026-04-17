@@ -844,8 +844,190 @@ ul.notifications-list {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.vehicle-tab-header {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.vehicle-tab-kpis {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.vehicle-tab-kpis p {
+  margin: 0;
+  border: 1px solid #dbe3f3;
+  background: #f8fbff;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 0.72rem;
+  color: #334155;
+}
+
+.vehicle-tab-kpis p strong {
+  color: #081738;
+}
+
+.vehicle-tab-kpis p.warn {
+  border-color: #f9c78a;
+  background: #fff7ed;
+  color: #b45309;
+}
+
+.vehicle-revisions-board {
+  grid-column: 1 / -1;
+  border: 1px solid #dbe3f3;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at top right, rgba(245, 158, 11, 0.14), transparent 36%),
+    linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  box-shadow: 0 14px 36px rgba(8, 23, 56, 0.08);
+}
+
+.vehicle-revisions-summary {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.revision-stat {
+  border: 1px solid #dbe3f3;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+}
+
+.revision-stat span {
+  display: block;
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
+.revision-stat strong {
+  font-size: 1.25rem;
+  color: #081738;
+}
+
+.revision-stat.done {
+  border-color: #bbf7d0;
+  background: linear-gradient(135deg, #f0fdf4, #ffffff);
+}
+
+.revision-stat.overdue {
+  border-color: #f9c78a;
+  background: linear-gradient(135deg, #fff7ed, #ffffff);
+}
+
+.revision-create-card {
+  border: 1px solid #dbe3f3;
+  border-radius: 10px;
+  background: #fff;
+  padding: 12px;
+}
+
+.revision-create-card h4 {
+  margin: 0 0 8px;
+  color: #081738;
+}
+
+.revision-create-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(180px, 1.2fr) 140px minmax(200px, 1.5fr) auto;
+  align-items: center;
+}
+
+.revision-create-grid select,
+.revision-create-grid input,
+.revision-actions select {
+  border: 1px solid #dbe1ea;
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 0.78rem;
+  color: #334155;
+  background: #fff;
+}
+
+.revision-create-grid button {
+  border: 1px solid #f59e0b;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #f59e0b, #fbbf24);
+  color: #fff;
+  padding: 7px 12px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  box-shadow: 0 8px 18px rgba(245, 158, 11, 0.28);
+}
+
+.vehicle-revisions-list {
+  gap: 8px;
+}
+
+.revision-card {
+  border: 1px solid #dbe3f3;
+  border-radius: 10px;
+  background: #fff;
+  padding: 11px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.revision-card-main {
+  display: grid;
+  gap: 3px;
+}
+
+.revision-card h4 {
+  color: #0f172a;
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.revision-card p {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.revision-badge {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.revision-badge.is-scheduled {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.revision-badge.is-done {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.revision-badge.is-overdue {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
 .vehicle-cover {
-  height: 120px;
+  height: 136px;
   border-radius: 8px;
   background: #eef0f5;
   margin-bottom: 10px;
@@ -876,6 +1058,23 @@ ul.notifications-list {
   margin: 0 0 4px;
 }
 
+.vehicle-card h4 {
+  font-size: 1rem;
+}
+
+.vehicle-card {
+  border-color: #dbe3f3;
+  border-radius: 12px;
+  box-shadow: 0 10px 24px rgba(8, 23, 56, 0.06);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.vehicle-card:hover {
+  transform: translateY(-2px);
+  border-color: #bfdbfe;
+  box-shadow: 0 14px 30px rgba(8, 23, 56, 0.12);
+}
+
 .vehicle-meta-top {
   display: flex;
   align-items: center;
@@ -887,6 +1086,7 @@ ul.notifications-list {
   font-size: 0.62rem;
   color: #6b7280;
   font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .vehicle-status {
@@ -916,6 +1116,22 @@ ul.notifications-list {
 .contract-row p {
   margin: 0;
   color: #6b7280;
+}
+
+.vehicle-specs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.vehicle-specs span {
+  border: 1px solid #dbe3f3;
+  border-radius: 999px;
+  background: #f8fbff;
+  color: #475569;
+  font-size: 0.66rem;
+  padding: 3px 8px;
 }
 
 .airtag-editor {
@@ -954,7 +1170,13 @@ ul.notifications-list {
   background: #fff;
   color: #475569;
   font-size: 0.68rem;
-  padding: 4px 7px;
+  padding: 5px 8px;
+  font-weight: 600;
+}
+
+.revision-actions {
+  margin-top: 0;
+  align-items: center;
 }
 
 .modal-backdrop {
@@ -1073,14 +1295,27 @@ ul.notifications-list {
   align-items: center;
   justify-content: center;
   width: 100%;
-  border-radius: 8px;
+  border-radius: 9px;
   border: 1px solid #f59e0b;
-  background: #fff7ed;
+  background: linear-gradient(135deg, #fff7ed, #fffbeb);
   color: #b45309;
   padding: 7px 9px;
   font-size: 0.73rem;
   font-weight: 700;
   cursor: pointer;
+}
+
+.chips button {
+  border-color: #dbe3f3;
+  color: #334155;
+  padding: 6px 11px;
+  font-weight: 600;
+}
+
+.chips .active {
+  background: linear-gradient(135deg, #081738, #0f2a62);
+  border-color: #081738;
+  color: #fff;
 }
 
 .photo-upload-btn input {
@@ -1097,9 +1332,9 @@ ul.notifications-list {
 .vehicle-thumb {
   padding: 0;
   border: 1px solid #e5e7eb;
-  border-radius: 6px;
+  border-radius: 7px;
   overflow: hidden;
-  height: 54px;
+  height: 58px;
   background: #fff;
   cursor: pointer;
 }
@@ -1223,6 +1458,28 @@ ul.notifications-list {
   .toolbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .vehicle-tab-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .vehicle-tab-kpis {
+    justify-content: flex-start;
+  }
+
+  .vehicle-revisions-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .revision-create-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .revision-card {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .search-box {
