@@ -21,13 +21,49 @@ import {
   Wallet,
 } from 'lucide-react'
 import { jsPDF } from 'jspdf'
-import { localeOptions, useI18n } from '../lib/i18n'
+import { localeOptions, useI18n, type Locale } from '../lib/i18n'
 import { Link, NavLink, useParams, useSearchParams } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import {
+  supabase,
+  vehiclePhotosBucket,
+  parseVehiclePhotoObjectKey,
+  vehicleIdFromVehiclePhotoPath,
+  vehiclePhotosUsePublicUrl,
+} from '../lib/supabase'
 import './DashboardShell.css'
 
 /** Démo publique : connexion anonyme + accès sans abonnement (voir VITE_PUBLIC_DEMO_MODE). */
 const isPublicDemoMode = import.meta.env.VITE_PUBLIC_DEMO_MODE === 'true'
+
+function normalizeVehicleLabel(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/** URL affichable pour une clé ou URL Storage (signée ou publique selon le bucket). */
+async function resolveVehiclePhotoUrl(rawPath: string): Promise<string> {
+  const key = parseVehiclePhotoObjectKey(rawPath)
+  if (vehiclePhotosUsePublicUrl) {
+    const { data } = supabase.storage.from(vehiclePhotosBucket).getPublicUrl(key)
+    return data.publicUrl
+  }
+  const { data, error } = await supabase.storage
+    .from(vehiclePhotosBucket)
+    .createSignedUrl(key, 60 * 60)
+  if (error || !data?.signedUrl) {
+    console.warn(`[${vehiclePhotosBucket}] signed URL`, key, error?.message ?? '')
+    return ''
+  }
+  return data.signedUrl
+}
+
+/**
+ * Carte centrée sur la Thaïlande — `hl` aligne l’UI Google Maps et les toponymes
+ * sur la langue de l’utilisateur (où Google fournit des libellés traduits).
+ */
+function thailandMapEmbedUrl(locale: Locale) {
+  const hl = encodeURIComponent(locale)
+  return `https://www.google.com/maps?ll=13.75%2C100.5&z=6&hl=${hl}&t=m&output=embed`
+}
 
 const menuMeta = [
   { key: 'dashboard', icon: LayoutDashboard },
@@ -688,11 +724,6 @@ function VehiculesPage({
     due_date: '',
     note: '',
   })
-  const normalizeVehicleLabel = (value: string) =>
-    value
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
 
   const statusLabelMap = {
     available: app.available,
@@ -767,74 +798,76 @@ function VehiculesPage({
   useEffect(() => {
     const loadPhotos = async () => {
       const userId = sessionUserId
-      if (!userId) return
+      if (!userId) {
+        setVehiclePhotos({})
+        setVehicleGalleries({})
+        return
+      }
 
       const { data: rows, error: rowsError } = await supabase
         .from('vehicle_photos')
-        .select('id,vehicle_label,file_path,created_at')
+        .select('id,vehicle_id,vehicle_label,file_path,created_at')
         .eq('owner_id', userId)
         .order('created_at', { ascending: false })
-      if (rowsError || !rows) return
+      if (rowsError) {
+        console.warn('[vehicle_photos]', rowsError.message)
+        return
+      }
+      if (!rows?.length) {
+        setVehiclePhotos({})
+        setVehicleGalleries({})
+        return
+      }
 
-      const latestByVehicle = new Map<string, string>()
-      rows.forEach((row) => {
-        const normalizedLabel = normalizeVehicleLabel(row.vehicle_label)
-        if (!latestByVehicle.has(normalizedLabel)) {
-          latestByVehicle.set(normalizedLabel, row.file_path)
-        }
-      })
-
-      const entries = await Promise.all(
-        Array.from(latestByVehicle.entries()).map(async ([label, filePath]) => {
-          const { data } = await supabase.storage
-            .from('vehicle-photos')
-            .createSignedUrl(filePath, 60 * 60)
-          return [label, data?.signedUrl ?? ''] as const
-        }),
-      )
-
-      const grouped = new Map<string, Array<{ id: string; filePath: string }>>()
-      rows.forEach((row) => {
-        const normalizedLabel = normalizeVehicleLabel(row.vehicle_label)
-        const list = grouped.get(normalizedLabel) ?? []
-        if (list.length < 6) list.push({ id: row.id, filePath: row.file_path })
-        grouped.set(normalizedLabel, list)
-      })
-      const galleryEntries = await Promise.all(
-        Array.from(grouped.entries()).map(async ([label, photos]) => {
-          const signed = await Promise.all(
-            photos.map(async (photo) => {
-              const { data } = await supabase.storage
-                .from('vehicle-photos')
-                .createSignedUrl(photo.filePath, 60 * 60)
-              return {
-                id: photo.id,
-                filePath: photo.filePath,
-                signedUrl: data?.signedUrl ?? '',
-              }
-            }),
+      type PhotoRow = (typeof rows)[number]
+      const rowsForVehicle = (v: { id: string; brand: string; model: string }) => {
+        const nameNorm = normalizeVehicleLabel(`${v.brand} ${v.model}`)
+        return rows.filter((r: PhotoRow) => {
+          if (r.vehicle_id === v.id) return true
+          const idFromPath = vehicleIdFromVehiclePhotoPath(r.file_path)
+          if (idFromPath === v.id) return true
+          return (
+            r.vehicle_id == null && normalizeVehicleLabel(r.vehicle_label) === nameNorm
           )
-          return [label, signed.filter((item) => item.signedUrl)] as const
-        }),
-      )
+        })
+      }
 
       const nextPhotos: Record<string, string> = {}
-      entries.forEach(([label, signedUrl]) => {
-        if (signedUrl) nextPhotos[label] = signedUrl
-      })
       const nextGalleries: Record<
         string,
         Array<{ id: string; filePath: string; signedUrl: string }>
       > = {}
-      galleryEntries.forEach(([label, items]) => {
-        nextGalleries[label] = items
-      })
+
+      for (const v of vehiclesData) {
+        const matching = rowsForVehicle(v).sort(
+          (a, b) => +new Date(b.created_at) - +new Date(a.created_at),
+        )
+        if (!matching.length) continue
+
+        const signed = await Promise.all(
+          matching.slice(0, 6).map(async (row) => {
+            const key = parseVehiclePhotoObjectKey(row.file_path)
+            const signedUrl = await resolveVehiclePhotoUrl(row.file_path)
+            return {
+              id: row.id,
+              filePath: key,
+              signedUrl,
+            }
+          }),
+        )
+        const valid = signed.filter((item) => item.signedUrl)
+        if (!valid.length) continue
+
+        nextPhotos[v.id] = valid[0].signedUrl
+        nextGalleries[v.id] = valid
+      }
+
       setVehiclePhotos(nextPhotos)
       setVehicleGalleries(nextGalleries)
     }
 
     void loadPhotos()
-  }, [sessionUserId])
+  }, [sessionUserId, vehiclesData])
 
   useEffect(() => {
     const nextDrafts: Record<string, string> = {}
@@ -862,7 +895,7 @@ function VehiculesPage({
   }
 
   const onVehiclePhotoChange =
-    (vehicleName: string) => async (event: ChangeEvent<HTMLInputElement>) => {
+    (vehicleId: string, vehicleName: string) => async (event: ChangeEvent<HTMLInputElement>) => {
       setFeedback('')
       setError('')
       const file = event.target.files?.[0]
@@ -874,7 +907,7 @@ function VehiculesPage({
         return
       }
 
-      setUploadingFor(vehicleName)
+      setUploadingFor(vehicleId)
       const compressedFile = await compressImageFile(file)
       const extension = compressedFile.name.split('.').pop() || 'jpg'
       const normalizedVehicleLabel = normalizeVehicleLabel(vehicleName)
@@ -882,7 +915,7 @@ function VehiculesPage({
       const filePath = `${sessionUserId}/${safeVehicle}/${Date.now()}.${extension}`
 
       const { error: uploadError } = await supabase.storage
-        .from('vehicle-photos')
+        .from(vehiclePhotosBucket)
         .upload(filePath, compressedFile, {
           cacheControl: '3600',
           upsert: false,
@@ -897,6 +930,7 @@ function VehiculesPage({
 
       const { error: insertError } = await supabase.from('vehicle_photos').insert({
         owner_id: sessionUserId,
+        vehicle_id: vehicleId,
         vehicle_label: normalizedVehicleLabel,
         file_path: filePath,
       })
@@ -906,23 +940,21 @@ function VehiculesPage({
         return
       }
 
-      const { data: signedData, error: signedError } = await supabase.storage
-        .from('vehicle-photos')
-        .createSignedUrl(filePath, 60 * 60)
+      const displayUrl = await resolveVehiclePhotoUrl(filePath)
 
-      if (signedError || !signedData?.signedUrl) {
-        setError(signedError?.message || app.vehiclePhotoError)
+      if (!displayUrl) {
+        setError(app.vehiclePhotoError)
       } else {
-        setVehiclePhotos((prev) => ({ ...prev, [normalizedVehicleLabel]: signedData.signedUrl }))
+        setVehiclePhotos((prev) => ({ ...prev, [vehicleId]: displayUrl }))
         setVehicleGalleries((prev) => ({
           ...prev,
-          [normalizedVehicleLabel]: [
+          [vehicleId]: [
             {
               id: `local-${Date.now()}`,
-              filePath,
-              signedUrl: signedData.signedUrl,
+              filePath: parseVehiclePhotoObjectKey(filePath),
+              signedUrl: displayUrl,
             },
-            ...(prev[normalizedVehicleLabel] ?? []),
+            ...(prev[vehicleId] ?? []),
           ].slice(0, 6),
         }))
         setFeedback(app.vehiclePhotoSuccess)
@@ -930,12 +962,12 @@ function VehiculesPage({
       setUploadingFor(null)
     }
 
-  const onDeleteVehiclePhoto = async (vehicleName: string, photoId: string, filePath: string) => {
+  const onDeleteVehiclePhoto = async (vehicleId: string, photoId: string, filePath: string) => {
     setFeedback('')
     setError('')
     const { error: removeStorageError } = await supabase.storage
-      .from('vehicle-photos')
-      .remove([filePath])
+      .from(vehiclePhotosBucket)
+      .remove([parseVehiclePhotoObjectKey(filePath)])
     if (removeStorageError) {
       setError(removeStorageError.message)
       return
@@ -943,14 +975,14 @@ function VehiculesPage({
     if (!photoId.startsWith('local-')) {
       await supabase.from('vehicle_photos').delete().eq('id', photoId)
     }
-    const remaining = (vehicleGalleries[vehicleName] ?? []).filter((item) => item.id !== photoId)
+    const remaining = (vehicleGalleries[vehicleId] ?? []).filter((item) => item.id !== photoId)
     setVehicleGalleries((prev) => ({
       ...prev,
-      [vehicleName]: remaining,
+      [vehicleId]: remaining,
     }))
     setVehiclePhotos((prev) => ({
       ...prev,
-      [vehicleName]: remaining[0]?.signedUrl || prev[vehicleName],
+      [vehicleId]: remaining[0]?.signedUrl || prev[vehicleId],
     }))
   }
 
@@ -1053,15 +1085,15 @@ function VehiculesPage({
       )}
       {vehicleTab === 'fleet' &&
         filteredVehicles.map((vehicle) => (
-        <article key={vehicle.name} className="vehicle-card">
+        <article key={vehicle.id} className="vehicle-card">
           <div className="vehicle-meta-top">
             <small>{vehicle.cardType}</small>
             <span className={`vehicle-status ${vehicle.statusKey}`}>{vehicle.statusLabel}</span>
           </div>
           <div className="vehicle-cover">
-            {vehiclePhotos[normalizeVehicleLabel(vehicle.name)] ? (
+            {vehiclePhotos[vehicle.id] ? (
               <img
-                src={vehiclePhotos[normalizeVehicleLabel(vehicle.name)]}
+                src={vehiclePhotos[vehicle.id]}
                 alt={vehicle.name}
                 loading="lazy"
               />
@@ -1070,7 +1102,6 @@ function VehiculesPage({
             )}
           </div>
           <h4>{vehicle.name}</h4>
-          <p className="vehicle-specs">{vehicle.specs.join('  •  ')}</p>
           <div className="airtag-editor">
             <input
               value={airtagDrafts[vehicle.id] ?? ''}
@@ -1099,18 +1130,18 @@ function VehiculesPage({
             </button>
           </div>
           <label className="photo-upload-btn">
-            {uploadingFor === vehicle.name ? app.vehiclePhotoUploading : app.vehiclePhotoCta}
+            {uploadingFor === vehicle.id ? app.vehiclePhotoUploading : app.vehiclePhotoCta}
             <input
               type="file"
               accept="image/*"
               capture="environment"
-              onChange={onVehiclePhotoChange(vehicle.name)}
-              disabled={uploadingFor === vehicle.name}
+              onChange={onVehiclePhotoChange(vehicle.id, vehicle.name)}
+              disabled={uploadingFor === vehicle.id}
             />
           </label>
-          {(vehicleGalleries[normalizeVehicleLabel(vehicle.name)] ?? []).length > 0 && (
+          {(vehicleGalleries[vehicle.id] ?? []).length > 0 && (
             <div className="vehicle-gallery">
-              {(vehicleGalleries[normalizeVehicleLabel(vehicle.name)] ?? []).map((photo) => (
+              {(vehicleGalleries[vehicle.id] ?? []).map((photo) => (
                 <div key={photo.id} className="vehicle-thumb-wrap">
                   <button
                     type="button"
@@ -1118,7 +1149,7 @@ function VehiculesPage({
                     onClick={() =>
                       setVehiclePhotos((prev) => ({
                         ...prev,
-                        [normalizeVehicleLabel(vehicle.name)]: photo.signedUrl,
+                        [vehicle.id]: photo.signedUrl,
                       }))
                     }
                   >
@@ -1128,11 +1159,7 @@ function VehiculesPage({
                     type="button"
                     className="vehicle-thumb-delete"
                     onClick={() =>
-                      void onDeleteVehiclePhoto(
-                        normalizeVehicleLabel(vehicle.name),
-                        photo.id,
-                        photo.filePath,
-                      )
+                      void onDeleteVehiclePhoto(vehicle.id, photo.id, photo.filePath)
                     }
                   >
                     {app.delete}
@@ -1620,6 +1647,7 @@ function CartePage({
   app: any
   vehiclesData: VehicleRow[]
 }) {
+  const { locale } = useI18n()
   const [positions, setPositions] = useState<Record<string, { lat: string; lng: string }>>({})
   useEffect(() => {
     const raw = localStorage.getItem('jlt-airtag-positions')
@@ -1653,9 +1681,10 @@ function CartePage({
         <h4>{app.mapTitle}</h4>
         <p>{app.mapSubtitle}</p>
         <iframe
+          key={locale}
           title="thailand-map"
-          src="https://www.openstreetmap.org/export/embed.html?bbox=95.0%2C4.5%2C106.5%2C21.5&layer=mapnik"
-          style={{ width: '100%', height: '320px', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+          src={thailandMapEmbedUrl(locale)}
+          className="carte-map-embed"
         />
       </article>
       <article className="list-item">
@@ -1667,7 +1696,7 @@ function CartePage({
             const pos = positions[vehicle.id] || { lat: '', lng: '' }
             const mapsLink =
               pos.lat && pos.lng
-                ? `https://www.google.com/maps?q=${encodeURIComponent(`${pos.lat},${pos.lng}`)}`
+                ? `https://www.google.com/maps?q=${encodeURIComponent(`${pos.lat},${pos.lng}`)}&hl=${encodeURIComponent(locale)}`
                 : ''
             return (
               <article key={vehicle.id} className="contract-row">
@@ -2348,7 +2377,7 @@ export function DashboardShell() {
         const extension = compressedPhoto.name.split('.').pop() || 'jpg'
         const filePath = `${ownerId}/${createdVehicle.id}/${Date.now()}.${extension}`
         const { error: uploadError } = await supabase.storage
-          .from('vehicle-photos')
+          .from(vehiclePhotosBucket)
           .upload(filePath, compressedPhoto, {
             cacheControl: '3600',
             upsert: false,
@@ -2357,9 +2386,12 @@ export function DashboardShell() {
         if (uploadError) {
           requestError = uploadError.message
         } else {
-          const vehicleLabel = `${createdVehicle.brand} ${createdVehicle.model}`.trim()
+          const vehicleLabel = normalizeVehicleLabel(
+            `${createdVehicle.brand} ${createdVehicle.model}`.trim(),
+          )
           const { error: photoInsertError } = await supabase.from('vehicle_photos').insert({
             owner_id: ownerId,
+            vehicle_id: createdVehicle.id,
             vehicle_label: vehicleLabel,
             file_path: filePath,
           })

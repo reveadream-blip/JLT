@@ -4,20 +4,28 @@ import {
   BarChart3,
   BellRing,
   Camera,
+  CheckCircle2,
   FileSignature,
   MapPin,
   ShieldCheck,
   Smartphone,
+  Star,
   Timer,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { localeOptions, useI18n, type Locale } from '../lib/i18n'
+import { HeroDashboardPreview } from './HeroDashboardPreview'
 import './LandingPage.css'
+
+function easeOutCubic(t: number) {
+  return 1 - Math.pow(1 - t, 3)
+}
 
 export function LandingPage() {
   const { locale, setLocale, t } = useI18n()
   const nav = t('nav')
   const landing = t('landing')
+
   const [counters, setCounters] = useState({ contracts: 0, clients: 0, revenus: 0 })
   const [kpis, setKpis] = useState({ minutes: 0, paperless: 0, access: 0 })
 
@@ -38,7 +46,7 @@ export function LandingPage() {
 
     const tick = (now: number) => {
       const progress = Math.min((now - startedAt) / durationMs, 1)
-      const easeOut = 1 - Math.pow(1 - progress, 3)
+      const easeOut = easeOutCubic(progress)
 
       setCounters({
         contracts: Math.round(45 * easeOut),
@@ -59,6 +67,30 @@ export function LandingPage() {
     rafId = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafId)
   }, [])
+
+  const pricingPlans = [
+    {
+      name: landing.pricingPlanMonthlyName,
+      price: landing.pricingPlanMonthlyPrice,
+      suffix: landing.pricingPlanMonthlySuffix,
+      variant: 'blue' as const,
+      popular: false,
+    },
+    {
+      name: landing.pricingPlanOneMonthName,
+      price: landing.pricingPlanOneMonthPrice,
+      suffix: landing.pricingPlanOneMonthSuffix,
+      variant: 'orange' as const,
+      popular: true,
+    },
+    {
+      name: landing.pricingPlanYearlyName,
+      price: landing.pricingPlanYearlyPrice,
+      suffix: landing.pricingPlanYearlySuffix,
+      variant: 'purple' as const,
+      popular: false,
+    },
+  ]
 
   const featureItems = [
     {
@@ -161,24 +193,11 @@ export function LandingPage() {
             </ul>
           </div>
 
-          <div className="hero-card" aria-hidden="true">
-            <div className="window-bar" />
-            <div className="mock-grid">
-              <div className="mock metric">
-                <p>{landing.metrics[0]}</p>
-                <strong>{counters.contracts}</strong>
-              </div>
-              <div className="mock metric">
-                <p>{landing.metrics[1]}</p>
-                <strong>{counters.clients}</strong>
-              </div>
-              <div className="mock metric">
-                <p>{landing.metrics[2]}</p>
-                <strong>{counters.revenus}k</strong>
-              </div>
-              <div className="mock chart" />
-              <div className="mock donut" />
-            </div>
+          <div className="hero-visual">
+            <HeroDashboardPreview
+              metricLabels={landing.metrics as [string, string, string]}
+              counters={counters}
+            />
           </div>
         </section>
 
@@ -233,14 +252,52 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section className="pricing-solution" id="pricing">
+        <section className="pricing-section" id="pricing">
           <p className="pricing-label">{nav.pricing}</p>
-          <h3>{landing.pricingTitle}</h3>
-          <p className="pricing-amount">{landing.pricingAmount}</p>
-          <p>{landing.pricingDescription}</p>
-          <Link to="/app/dashboard" className="btn btn-accent">
-            {landing.start}
-          </Link>
+          <h3 className="pricing-section-title">{landing.pricingSectionTitle}</h3>
+          <p className="pricing-section-subtitle">{landing.pricingSectionSubtitle}</p>
+
+          <div className="pricing-grid">
+            {pricingPlans.map((plan) => (
+              <article
+                key={plan.name}
+                className={`pricing-card pricing-card--${plan.variant}${plan.popular ? ' pricing-card--featured' : ''}`}
+              >
+                {plan.popular && (
+                  <div className="pricing-card-badge" aria-hidden="true">
+                    <Star size={12} strokeWidth={2.5} />
+                    {landing.pricingPopularBadge}
+                  </div>
+                )}
+                <span className={`pricing-card-pill pricing-card-pill--${plan.variant}`}>{plan.name}</span>
+                <p className="pricing-card-price">
+                  <span className="pricing-card-amount">{plan.price}</span>
+                  <span className="pricing-card-suffix">{plan.suffix}</span>
+                </p>
+                <p className="pricing-card-desc">{landing.pricingUnlimitedDescription}</p>
+                <ul className="pricing-card-features">
+                  {landing.pricingFeatureBullets.map((line: string) => (
+                    <li key={line}>
+                      <CheckCircle2 size={16} className="pricing-card-check" aria-hidden />
+                      <span>{line}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Link to="/app/dashboard" className={`pricing-card-cta pricing-card-cta--${plan.variant}`}>
+                  {landing.pricingCta}
+                </Link>
+              </article>
+            ))}
+          </div>
+
+          <div className="pricing-how">
+            <h4 className="pricing-how-title">{landing.pricingHowTitle}</h4>
+            <ul className="pricing-how-list">
+              {landing.pricingHowItems.map((item: string) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
         </section>
       </main>
     </div>

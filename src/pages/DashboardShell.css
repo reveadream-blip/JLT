@@ -918,11 +918,6 @@ ul.notifications-list {
   color: #6b7280;
 }
 
-.vehicle-specs {
-  font-size: 0.68rem;
-  margin-bottom: 4px;
-}
-
 .airtag-editor {
   display: flex;
   gap: 6px;
@@ -1237,4 +1232,15 @@ ul.notifications-list {
   .wide-card {
     grid-column: span 1;
   }
+}
+
+/* Carte Thaïlande (page Carte) : grande hauteur pour mieux voir le pays en entier */
+.carte-map-embed {
+  display: block;
+  width: 100%;
+  min-height: 420px;
+  height: min(620px, 72vh);
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06);
 }
