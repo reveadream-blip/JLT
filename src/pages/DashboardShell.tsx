@@ -19,6 +19,7 @@ import {
   Plus,
   Search,
   Users,
+  X,
 } from 'lucide-react'
 import { jsPDF } from 'jspdf'
 import { localeOptions, useI18n } from '../lib/i18n'
@@ -41,6 +42,25 @@ const isPublicDemoMode = import.meta.env.VITE_PUBLIC_DEMO_MODE === 'true'
 
 function normalizeVehicleLabel(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/** Recherche insensible aux accents (e / é / è…). */
+function foldSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
+
+/** Plusieurs mots : chaque fragment doit apparaître (ordre libre), ex. « pcx hon » → Honda PCX */
+function matchesSearchQuery(haystack: string, query: string): boolean {
+  const raw = query.trim()
+  if (!raw) return true
+  const folded = foldSearchText(haystack)
+  const tokens = foldSearchText(raw)
+    .split(/\s+/)
+    .filter(Boolean)
+  return tokens.every((t) => folded.includes(t))
 }
 
 /** Nombre de jours facturés (aligné sur la facture PDF : au moins 1 jour si fin > début). */
@@ -140,6 +160,8 @@ type ClientRow = {
   passport_number?: string | null
   nationality?: string | null
   passport_photo_path?: string | null
+  notes?: string | null
+  deposit_amount?: number | null
 }
 type ContractRow = {
   id: string
@@ -344,6 +366,15 @@ const defaultInvoiceProfile: InvoiceProfile = {
   companyAddress: 'Thailand',
   companyPhone: '',
   logoDataUrl: '',
+}
+
+/** Dépôt / caution client : chaîne vide → null ; invalide → null avec invalid=true */
+function parseClientDeposit(raw: string): { value: number | null; invalid: boolean } {
+  const t = raw.trim()
+  if (!t) return { value: null, invalid: false }
+  const n = Number(t.replace(/\s/g, '').replace(',', '.'))
+  if (Number.isNaN(n) || n < 0) return { value: null, invalid: true }
+  return { value: Math.round(n * 100) / 100, invalid: false }
 }
 
 function parseInvoiceProfile(raw: unknown): InvoiceProfile {
@@ -1009,6 +1040,8 @@ function VehiculesPage({
   } as const
   const vehicles = vehiclesData.map((vehicle) => ({
     id: vehicle.id,
+    brand: vehicle.brand,
+    model: vehicle.model,
     name: `${vehicle.brand} ${vehicle.model}`,
     type: vehicle.type,
     statusKey: vehicle.status,
@@ -1032,19 +1065,16 @@ function VehiculesPage({
         ? selectedStatus
         : 'all'
     const statusOk = vehicleStatusFilter === 'all' || vehicle.statusKey === vehicleStatusFilter
-    const q = searchQuery.trim().toLowerCase()
-    const searchOk =
-      !q ||
-      [
-        vehicle.name,
-        vehicle.cardType,
-        vehicle.statusLabel,
-        vehicle.statusKey,
-        ...vehicle.specs,
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(q)
+    const searchHaystack = [
+      vehicle.name,
+      vehicle.brand,
+      vehicle.model,
+      vehicle.cardType,
+      vehicle.statusLabel,
+      vehicle.statusKey,
+      ...vehicle.specs,
+    ].join(' ')
+    const searchOk = matchesSearchQuery(searchHaystack, searchQuery)
     return typeOk && statusOk && searchOk
   })
   const sortedRevisions = [...revisionsData].sort((a, b) =>
@@ -1481,16 +1511,30 @@ function VehiculesPage({
               {app.delete}
             </button>
           </div>
-          <label className="photo-upload-btn">
-            {uploadingFor === vehicle.id ? app.vehiclePhotoUploading : app.vehiclePhotoCta}
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={onVehiclePhotoChange(vehicle.id, vehicle.name)}
-              disabled={uploadingFor === vehicle.id}
-            />
-          </label>
+          <div className="vehicle-photo-upload-actions">
+            <label className="photo-upload-btn photo-upload-btn--half">
+              {uploadingFor === vehicle.id ? app.vehiclePhotoUploading : app.fileInputChooseSingle}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={onVehiclePhotoChange(vehicle.id, vehicle.name)}
+                disabled={uploadingFor === vehicle.id}
+              />
+            </label>
+            <label className="photo-upload-btn photo-upload-btn--half">
+              {uploadingFor === vehicle.id ? app.vehiclePhotoUploading : app.vehiclePhotoTakePhoto}
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={(e) => {
+                  onVehiclePhotoChange(vehicle.id, vehicle.name)(e)
+                  requestAnimationFrame(() => window.scrollTo(0, 0))
+                }}
+                disabled={uploadingFor === vehicle.id}
+              />
+            </label>
+          </div>
           {(vehicleGalleries[vehicle.id] ?? []).length > 0 && (
             <div className="vehicle-gallery">
               {(vehicleGalleries[vehicle.id] ?? []).map((photo) => (
@@ -1534,25 +1578,86 @@ function VehiculesPage({
 function ClientsPage({
   app,
   clientsData,
+  searchQuery,
+  passportUrlsByClientId,
+  onOpenPassportViewer,
   onEditClient,
   onDeleteClient,
 }: {
   app: any
   clientsData: ClientRow[]
+  searchQuery: string
+  passportUrlsByClientId: Record<string, string>
+  onOpenPassportViewer: (url: string, title: string) => void
   onEditClient: (clientId: string) => Promise<void>
   onDeleteClient: (clientId: string) => Promise<void>
 }) {
+  const filteredClients = useMemo(() => {
+    return clientsData.filter((client) => {
+      const searchHaystack = [
+        client.full_name,
+        client.nationality,
+        client.passport_number,
+        client.phone,
+        client.email,
+        client.notes,
+        client.deposit_amount != null && !Number.isNaN(Number(client.deposit_amount))
+          ? String(client.deposit_amount)
+          : '',
+      ]
+        .map((x) => (x == null ? '' : String(x).trim()))
+        .join(' ')
+      return matchesSearchQuery(searchHaystack, searchQuery)
+    })
+  }, [clientsData, searchQuery])
+
   return (
     <div className="list">
-      {clientsData.map((client) => (
-        <article key={client.id} className="list-item">
-          <h4>{client.full_name}</h4>
+      {filteredClients.map((client) => (
+        <article key={client.id} className="list-item list-item--client">
+          <div className="client-card__top">
+            <h4>{client.full_name}</h4>
+            {passportUrlsByClientId[client.id] ? (
+              <button
+                type="button"
+                className="client-passport-frame"
+                onClick={() =>
+                  onOpenPassportViewer(
+                    passportUrlsByClientId[client.id],
+                    client.full_name,
+                  )
+                }
+                aria-label={app.passportPhotoOpen}
+              >
+                <img
+                  src={passportUrlsByClientId[client.id]}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  className="client-passport-frame__img"
+                />
+              </button>
+            ) : null}
+          </div>
           <p>
             {app.fieldNationality}: {client.nationality?.trim() || '—'}
           </p>
           <p>
             {app.fieldPassportNumber}: {client.passport_number?.trim() || '—'}
           </p>
+          <p>
+            {app.fieldDeposit}:{' '}
+            {client.deposit_amount != null && !Number.isNaN(Number(client.deposit_amount))
+              ? `฿${Number(client.deposit_amount).toLocaleString(undefined, {
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 2,
+                })}`
+              : '—'}
+          </p>
+          <div className="client-card-notes">
+            <span className="client-card-notes__label">{app.fieldNotes}</span>
+            <p className="client-card-notes__text">{client.notes?.trim() || '—'}</p>
+          </div>
           <p>{client.phone || '—'}</p>
           <p>{client.email || '—'}</p>
           <div className="row-actions">
@@ -1573,6 +1678,7 @@ function ContratsPage({
   app,
   selectedType,
   selectedStatus,
+  searchQuery,
   contractsData,
   clientsData,
   vehiclesData,
@@ -1583,6 +1689,7 @@ function ContratsPage({
   app: any
   selectedType: VehicleTypeFilter
   selectedStatus: StatusFilter
+  searchQuery: string
   contractsData: ContractRow[]
   clientsData: ClientRow[]
   vehiclesData: VehicleRow[]
@@ -1634,12 +1741,30 @@ function ContratsPage({
       displayTotal,
       clientEmail: client?.email?.trim() || '',
       clientPhone: client?.phone?.trim() || '',
+      vehicleBrand: vehicle?.brand?.trim() || '',
+      vehicleModel: vehicle?.model?.trim() || '',
+      licensePlate: vehicle?.license_plate?.trim() || '',
     }
   })
   const filteredContracts = contracts.filter((contract) => {
     const typeOk = selectedType === 'all' || contract.type === selectedType
     const statusOk = selectedStatus === 'all' || contract.statusKey === selectedStatus
-    return typeOk && statusOk
+    const searchHaystack = [
+      contract.label,
+      contract.clientName,
+      contract.vehicleName,
+      contract.vehicleBrand,
+      contract.vehicleModel,
+      contract.licensePlate,
+      contract.status,
+      contract.clientEmail,
+      contract.clientPhone,
+      String(contract.startAt || '').slice(0, 10),
+      String(contract.endAt || '').slice(0, 10),
+      contract.id,
+    ].join(' ')
+    const searchOk = matchesSearchQuery(searchHaystack, searchQuery)
+    return typeOk && statusOk && searchOk
   })
   const buildInvoiceDoc = async (contract: (typeof filteredContracts)[number]) => {
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
@@ -1988,15 +2113,51 @@ function ContratsPage({
 
 function PlanningPage({
   app,
+  searchQuery,
   contractsData,
+  clientsData,
+  vehiclesData,
   onEditContract,
   onDeleteContract,
 }: {
   app: any
+  searchQuery: string
   contractsData: ContractRow[]
+  clientsData: ClientRow[]
+  vehiclesData: VehicleRow[]
   onEditContract: (contractId: string) => Promise<void>
   onDeleteContract: (contractId: string) => Promise<void>
 }) {
+  const clientById = useMemo(
+    () => new Map(clientsData.map((row) => [row.id, row])),
+    [clientsData],
+  )
+  const vehicleById = useMemo(
+    () => new Map(vehiclesData.map((row) => [row.id, row])),
+    [vehiclesData],
+  )
+
+  const filteredContracts = useMemo(() => {
+    return contractsData.filter((contract) => {
+      const client = clientById.get(contract.client_id)
+      const vehicle = vehicleById.get(contract.vehicle_id)
+      const vehicleLabel = vehicle ? `${vehicle.brand} ${vehicle.model}`.trim() : ''
+      const searchHaystack = [
+        client?.full_name?.trim() || '',
+        vehicle?.brand?.trim() || '',
+        vehicle?.model?.trim() || '',
+        vehicleLabel,
+        vehicle?.license_plate?.trim() || '',
+        client?.email?.trim() || '',
+        client?.phone?.trim() || '',
+        contract.id,
+        String(contract.start_at || '').slice(0, 10),
+        String(contract.end_at || '').slice(0, 10),
+      ].join(' ')
+      return matchesSearchQuery(searchHaystack, searchQuery)
+    })
+  }, [contractsData, clientById, vehicleById, searchQuery])
+
   const now = new Date()
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0)
@@ -2010,7 +2171,7 @@ function PlanningPage({
       : null
     const hasContract =
       !!date &&
-      contractsData.some((contract) => {
+      filteredContracts.some((contract) => {
         const start = contract.start_at.slice(0, 10)
         const end = contract.end_at.slice(0, 10)
         return date >= start && date <= end
@@ -2030,26 +2191,32 @@ function PlanningPage({
         ))}
       </section>
       <div className="list" style={{ marginTop: '10px' }}>
-        {contractsData.slice(0, 5).map((contract) => (
-          <article key={contract.id} className="contract-row">
-            <div>
-              <h4>{contract.id.slice(0, 8).toUpperCase()}</h4>
-              <p>
-                {new Date(contract.start_at).toLocaleDateString('fr-FR')} -{' '}
-                {new Date(contract.end_at).toLocaleDateString('fr-FR')}
-              </p>
-              <div className="row-actions">
-                <button type="button" onClick={() => void onEditContract(contract.id)}>
-                  {app.edit}
-                </button>
-                <button type="button" onClick={() => void onDeleteContract(contract.id)}>
-                  {app.delete}
-                </button>
+        {filteredContracts.map((contract) => {
+          const client = clientById.get(contract.client_id)
+          const vehicle = vehicleById.get(contract.vehicle_id)
+          const label = `${client?.full_name?.trim() || app.entityClient} — ${vehicle ? `${vehicle.brand} ${vehicle.model}`.trim() : app.entityVehicle}`
+          return (
+            <article key={contract.id} className="contract-row">
+              <div>
+                <h4>{label}</h4>
+                <p className="planning-contract-ref">{contract.id.slice(0, 8).toUpperCase()}</p>
+                <p>
+                  {new Date(contract.start_at).toLocaleDateString('fr-FR')} -{' '}
+                  {new Date(contract.end_at).toLocaleDateString('fr-FR')}
+                </p>
+                <div className="row-actions">
+                  <button type="button" onClick={() => void onEditContract(contract.id)}>
+                    {app.edit}
+                  </button>
+                  <button type="button" onClick={() => void onDeleteContract(contract.id)}>
+                    {app.delete}
+                  </button>
+                </div>
               </div>
-            </div>
-            <span className="pill">{contract.status}</span>
-          </article>
-        ))}
+              <span className="pill">{contract.status}</span>
+            </article>
+          )
+        })}
       </div>
     </>
   )
@@ -2157,6 +2324,8 @@ function renderSection(
   onDeleteClient: (clientId: string) => Promise<void>,
   onEditContract: (contractId: string) => Promise<void>,
   onDeleteContract: (contractId: string) => Promise<void>,
+  passportUrlsByClientId: Record<string, string>,
+  onOpenPassportViewer: (url: string, title: string) => void,
 ) {
   switch (section) {
     case 'vehicules':
@@ -2180,6 +2349,9 @@ function renderSection(
         <ClientsPage
           app={app}
           clientsData={clientsData}
+          searchQuery={searchQuery}
+          passportUrlsByClientId={passportUrlsByClientId}
+          onOpenPassportViewer={onOpenPassportViewer}
           onEditClient={onEditClient}
           onDeleteClient={onDeleteClient}
         />
@@ -2190,6 +2362,7 @@ function renderSection(
           app={app}
           selectedType={selectedType}
           selectedStatus={selectedStatus}
+          searchQuery={searchQuery}
           contractsData={contractsData}
           clientsData={clientsData}
           vehiclesData={vehiclesData}
@@ -2202,7 +2375,10 @@ function renderSection(
       return (
         <PlanningPage
           app={app}
+          searchQuery={searchQuery}
           contractsData={contractsData}
+          clientsData={clientsData}
+          vehiclesData={vehiclesData}
           onEditContract={onEditContract}
           onDeleteContract={onDeleteContract}
         />
@@ -2257,11 +2433,12 @@ export function DashboardShell() {
   const [modalClientPassportPhoto, setModalClientPassportPhoto] = useState<File | null>(null)
   const [clientPassportPreviewUrl, setClientPassportPreviewUrl] = useState<string | null>(null)
   const [passportLocalPreviewUrl, setPassportLocalPreviewUrl] = useState<string | null>(null)
-  const modalClientPassportInputRef = useRef<HTMLInputElement>(null)
   const [modalInspectionPhotos, setModalInspectionPhotos] = useState<File[]>([])
   const [savingModal, setSavingModal] = useState(false)
   const [modalError, setModalError] = useState('')
   const [loadError, setLoadError] = useState('')
+  const [clientPassportListUrls, setClientPassportListUrls] = useState<Record<string, string>>({})
+  const [passportViewer, setPassportViewer] = useState<{ url: string; title: string } | null>(null)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const notificationsRef = useRef<HTMLDivElement>(null)
   const modalFileInputRef = useRef<HTMLInputElement>(null)
@@ -2279,7 +2456,9 @@ export function DashboardShell() {
       supabase.from('vehicles').select('id,type,brand,model,status,daily_price'),
       supabase
         .from('clients')
-        .select('id,full_name,phone,email,passport_number,nationality,passport_photo_path'),
+        .select(
+          'id,full_name,phone,email,passport_number,nationality,passport_photo_path,notes,deposit_amount',
+        ),
       supabase.from('contracts').select('id,client_id,vehicle_id,start_at,end_at,total_price,status,created_at'),
       supabase
         .from('vehicle_revisions')
@@ -2354,13 +2533,79 @@ export function DashboardShell() {
   }, [])
 
   useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const entries = await Promise.all(
+        clientsData.map(async (c) => {
+          const p = c.passport_photo_path?.trim()
+          if (!p) return null
+          const { data, error } = await supabase.storage
+            .from(clientPassportPhotosBucket)
+            .createSignedUrl(p, 3600)
+          if (error || !data?.signedUrl) return null
+          return [c.id, data.signedUrl] as const
+        }),
+      )
+      if (cancelled) return
+      const next: Record<string, string> = {}
+      for (const row of entries) {
+        if (row) next[row[0]] = row[1]
+      }
+      setClientPassportListUrls(next)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [clientsData])
+
+  useEffect(() => {
+    if (!passportViewer) return
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPassportViewer(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prevOverflow
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [passportViewer])
+
+  const passportPreviewRevokeRef = useRef<string | null>(null)
+  useEffect(() => {
     if (!modalClientPassportPhoto) {
+      if (passportPreviewRevokeRef.current) {
+        URL.revokeObjectURL(passportPreviewRevokeRef.current)
+        passportPreviewRevokeRef.current = null
+      }
       setPassportLocalPreviewUrl(null)
       return
     }
-    const u = URL.createObjectURL(modalClientPassportPhoto)
-    setPassportLocalPreviewUrl(u)
-    return () => URL.revokeObjectURL(u)
+    let cancelled = false
+    void (async () => {
+      try {
+        const compressed = await compressImageFile(modalClientPassportPhoto)
+        if (cancelled) return
+        if (passportPreviewRevokeRef.current) URL.revokeObjectURL(passportPreviewRevokeRef.current)
+        const u = URL.createObjectURL(compressed)
+        passportPreviewRevokeRef.current = u
+        setPassportLocalPreviewUrl(u)
+      } catch {
+        if (cancelled) return
+        if (passportPreviewRevokeRef.current) URL.revokeObjectURL(passportPreviewRevokeRef.current)
+        const u = URL.createObjectURL(modalClientPassportPhoto)
+        passportPreviewRevokeRef.current = u
+        setPassportLocalPreviewUrl(u)
+      }
+    })()
+    return () => {
+      cancelled = true
+      if (passportPreviewRevokeRef.current) {
+        URL.revokeObjectURL(passportPreviewRevokeRef.current)
+        passportPreviewRevokeRef.current = null
+      }
+    }
   }, [modalClientPassportPhoto])
 
   useEffect(() => {
@@ -2543,6 +2788,8 @@ export function DashboardShell() {
         passport_number: row.passport_number || '',
         nationality: row.nationality || '',
         passport_photo_path: row.passport_photo_path || '',
+        notes: row.notes || '',
+        deposit_amount: row.deposit_amount != null ? String(row.deposit_amount) : '',
       },
     })
   }
@@ -2608,6 +2855,11 @@ export function DashboardShell() {
         setModalError(app.validationEmailInvalid)
         return
       }
+      const dep = parseClientDeposit(editModal.values.deposit_amount || '')
+      if (dep.invalid) {
+        setModalError(app.validationDepositInvalid)
+        return
+      }
     }
     if (editModal.kind === 'contract') {
       if (!editModal.values.client_id || !editModal.values.vehicle_id) {
@@ -2645,13 +2897,13 @@ export function DashboardShell() {
     }
     setSavingModal(true)
     let requestError: string | null = null
+    try {
     const {
       data: { session },
     } = await supabase.auth.getSession()
     const ownerId = currentUserId || session?.user?.id || null
 
     if (editModal.mode === 'create' && !ownerId) {
-      setSavingModal(false)
       setModalError(app.vehiclePhotoAuth)
       return
     }
@@ -2670,6 +2922,7 @@ export function DashboardShell() {
       if (error) requestError = error.message
     }
     if (editModal.kind === 'client' && editModal.mode === 'edit') {
+      const depositVal = parseClientDeposit(editModal.values.deposit_amount || '').value
       const { error } = await supabase
         .from('clients')
         .update({
@@ -2678,6 +2931,8 @@ export function DashboardShell() {
           email: editModal.values.email || null,
           passport_number: (editModal.values.passport_number || '').trim() || null,
           nationality: (editModal.values.nationality || '').trim() || null,
+          notes: (editModal.values.notes || '').trim() || null,
+          deposit_amount: depositVal,
         })
         .eq('id', editModal.id)
       if (error) requestError = error.message
@@ -2799,18 +3054,46 @@ export function DashboardShell() {
       }
     }
     if (editModal.kind === 'client' && editModal.mode === 'create' && ownerId) {
-      const { data: createdClient, error } = await supabase
+      const depositVal = parseClientDeposit(editModal.values.deposit_amount || '').value
+      const baseInsert = {
+        owner_id: ownerId,
+        full_name: editModal.values.full_name,
+        phone: editModal.values.phone || null,
+        email: editModal.values.email || null,
+      }
+      const passportOnlyInsert = {
+        ...baseInsert,
+        passport_number: (editModal.values.passport_number || '').trim() || null,
+        nationality: (editModal.values.nationality || '').trim() || null,
+      }
+      const extendedInsert = {
+        ...passportOnlyInsert,
+        notes: (editModal.values.notes || '').trim() || null,
+        deposit_amount: depositVal,
+      }
+      const isSchemaish = (msg: string) =>
+        msg.includes('column') ||
+        msg.includes('schema') ||
+        msg.includes('passport') ||
+        msg.includes('nationality') ||
+        msg.includes('notes') ||
+        msg.includes('deposit') ||
+        msg.includes('Could not find')
+      let { data: createdClient, error } = await supabase
         .from('clients')
-        .insert({
-          owner_id: ownerId,
-          full_name: editModal.values.full_name,
-          phone: editModal.values.phone || null,
-          email: editModal.values.email || null,
-          passport_number: (editModal.values.passport_number || '').trim() || null,
-          nationality: (editModal.values.nationality || '').trim() || null,
-        })
+        .insert(extendedInsert)
         .select('id')
         .single()
+      if (error && isSchemaish(error.message)) {
+        const retry = await supabase.from('clients').insert(passportOnlyInsert).select('id').single()
+        createdClient = retry.data
+        error = retry.error
+      }
+      if (error && isSchemaish(error.message)) {
+        const retry2 = await supabase.from('clients').insert(baseInsert).select('id').single()
+        createdClient = retry2.data
+        error = retry2.error
+      }
       if (error) requestError = error.message
       else if (createdClient?.id && modalClientPassportPhoto && !requestError) {
         const compressed = await compressImageFile(modalClientPassportPhoto)
@@ -2966,14 +3249,17 @@ export function DashboardShell() {
     }
 
     if (requestError) {
-      setSavingModal(false)
       setModalError(requestError)
       return
     }
 
-    setSavingModal(false)
     closeModal()
     await refreshAppData()
+    } catch (err) {
+      setModalError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSavingModal(false)
+    }
   }
   const onOpenCreateModal = () => {
     setModalVehiclePhoto(null)
@@ -3000,6 +3286,8 @@ export function DashboardShell() {
           passport_number: '',
           nationality: '',
           passport_photo_path: '',
+          notes: '',
+          deposit_amount: '',
         },
       })
       return
@@ -3344,6 +3632,8 @@ export function DashboardShell() {
               onDeleteClient,
               onEditContract,
               onDeleteContract,
+              clientPassportListUrls,
+              (url: string, title: string) => setPassportViewer({ url, title }),
             )
           )}
         </div>
@@ -3375,26 +3665,39 @@ export function DashboardShell() {
                   <input value={editModal.values.daily_price || ''} onChange={(e) => setEditModal((p) => (p ? { ...p, values: { ...p.values, daily_price: e.target.value } } : p))} placeholder={app.fieldDailyPrice} />
                   <div className="modal-file-input">
                     <span>{app.vehiclePhotoCta}</span>
-                    <div className="modal-file-input__row">
-                      <button
-                        type="button"
-                        className="modal-file-input__pick"
-                        onClick={() => modalFileInputRef.current?.click()}
-                      >
-                        {app.fileInputChooseSingle}
-                      </button>
+                    <div className="modal-file-input__row modal-file-input__row--vehicle-photo">
+                      <label className="modal-file-input__pick-label">
+                        <span className="modal-file-input__pick">{app.fileInputChooseSingle}</span>
+                        <input
+                          type="file"
+                          className="modal-file-input__overlay-file"
+                          accept="image/*"
+                          onChange={(event) => {
+                            setModalVehiclePhoto(event.target.files?.[0] ?? null)
+                            event.target.value = ''
+                          }}
+                        />
+                      </label>
+                      <label className="modal-file-input__pick-label">
+                        <span className="modal-file-input__pick">{app.vehiclePhotoTakePhoto}</span>
+                        <input
+                          type="file"
+                          className="modal-file-input__overlay-file"
+                          accept="image/*"
+                          capture="environment"
+                          onChange={(event) => {
+                            setModalVehiclePhoto(event.target.files?.[0] ?? null)
+                            event.target.value = ''
+                            requestAnimationFrame(() => {
+                              window.scrollTo(0, 0)
+                            })
+                          }}
+                        />
+                      </label>
                       <span className="modal-file-input__status">
                         {modalVehiclePhoto ? modalVehiclePhoto.name : app.fileInputNoneSelected}
                       </span>
                     </div>
-                    <input
-                      ref={modalFileInputRef}
-                      type="file"
-                      className="modal-file-input__hidden"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={(event) => setModalVehiclePhoto(event.target.files?.[0] ?? null)}
-                    />
                   </div>
                   <select value={editModal.values.status || 'available'} onChange={(e) => setEditModal((p) => (p ? { ...p, values: { ...p.values, status: e.target.value } } : p))}>
                     <option value="available">{app.available}</option>
@@ -3451,28 +3754,60 @@ export function DashboardShell() {
                     }
                     placeholder={app.fieldEmail}
                   />
+                  <div className="modal-field">
+                    <label htmlFor="jlt-client-notes">{app.fieldNotes}</label>
+                    <textarea
+                      id="jlt-client-notes"
+                      rows={3}
+                      value={editModal.values.notes || ''}
+                      onChange={(e) =>
+                        setEditModal((p) =>
+                          p ? { ...p, values: { ...p.values, notes: e.target.value } } : p,
+                        )
+                      }
+                      placeholder={app.fieldNotesPlaceholder}
+                    />
+                  </div>
+                  <div className="modal-field">
+                    <label htmlFor="jlt-client-deposit">{app.fieldDeposit}</label>
+                    <input
+                      id="jlt-client-deposit"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      inputMode="decimal"
+                      value={editModal.values.deposit_amount || ''}
+                      onChange={(e) =>
+                        setEditModal((p) =>
+                          p ? { ...p, values: { ...p.values, deposit_amount: e.target.value } } : p,
+                        )
+                      }
+                      placeholder="0"
+                    />
+                  </div>
                   <div className="modal-file-input">
                     <span>{app.clientPassportPhotoCta}</span>
-                    <div className="modal-file-input__row">
-                      <button
-                        type="button"
-                        className="modal-file-input__pick"
-                        onClick={() => modalClientPassportInputRef.current?.click()}
-                      >
-                        {app.fileInputChooseSingle}
-                      </button>
+                    <div className="modal-file-input__row modal-file-input__row--passport">
+                      <label className="modal-file-input__pick-label">
+                        <span className="modal-file-input__pick">{app.fileInputChooseSingle}</span>
+                        <input
+                          type="file"
+                          className="modal-file-input__overlay-file"
+                          accept="image/*"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0] ?? null
+                            setModalClientPassportPhoto(file)
+                            event.target.value = ''
+                            requestAnimationFrame(() => {
+                              window.scrollTo(0, 0)
+                            })
+                          }}
+                        />
+                      </label>
                       <span className="modal-file-input__status">
                         {modalClientPassportPhoto ? modalClientPassportPhoto.name : app.fileInputNoneSelected}
                       </span>
                     </div>
-                    <input
-                      ref={modalClientPassportInputRef}
-                      type="file"
-                      className="modal-file-input__hidden"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={(event) => setModalClientPassportPhoto(event.target.files?.[0] ?? null)}
-                    />
                   </div>
                   {(passportLocalPreviewUrl || clientPassportPreviewUrl) && (
                     <div className="modal-passport-preview">
@@ -3480,6 +3815,7 @@ export function DashboardShell() {
                         src={passportLocalPreviewUrl || clientPassportPreviewUrl || ''}
                         alt=""
                         className="modal-passport-preview__img"
+                        decoding="async"
                       />
                     </div>
                   )}
@@ -3738,6 +4074,35 @@ export function DashboardShell() {
                   {app.save}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+        {passportViewer && (
+          <div
+            className="passport-viewer-backdrop"
+            role="presentation"
+            onClick={() => setPassportViewer(null)}
+          >
+            <div
+              className="passport-viewer-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-label={passportViewer.title}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="passport-viewer-close"
+                onClick={() => setPassportViewer(null)}
+                aria-label={app.cancel}
+              >
+                <X size={22} strokeWidth={2} aria-hidden />
+              </button>
+              <img
+                src={passportViewer.url}
+                alt={app.passportPhotoAlt}
+                className="passport-viewer-img"
+              />
             </div>
           </div>
         )}

@@ -103,6 +103,8 @@ alter table public.vehicles add column if not exists airtag_code text;
 alter table public.clients add column if not exists passport_number text;
 alter table public.clients add column if not exists nationality text;
 alter table public.clients add column if not exists passport_photo_path text;
+alter table public.clients add column if not exists notes text;
+alter table public.clients add column if not exists deposit_amount numeric(12, 2);
 
 -- =========================================================
 -- Indexes
