@@ -18,6 +18,24 @@ export const vehiclePhotosBucket =
 export const vehiclePhotosUsePublicUrl =
   import.meta.env.VITE_VEHICLE_PHOTOS_IS_PUBLIC === 'true'
 
+/** Bucket Storage pour les photos de passeport client (voir supabase-client-passport-storage.sql). */
+export const clientPassportPhotosBucket =
+  (import.meta.env.VITE_CLIENT_PASSPORT_BUCKET as string | undefined)?.trim() ||
+  'client-passport-photos'
+
+export function buildClientPassportPhotoPath(options: {
+  isPublicDemo: boolean
+  userId: string
+  clientId: string
+  fileName: string
+}): string {
+  const { isPublicDemo, userId, clientId, fileName } = options
+  if (isPublicDemo) {
+    return `demo/${userId}/clients/${clientId}/${fileName}`
+  }
+  return `${userId}/clients/${clientId}/${fileName}`
+}
+
 /**
  * Clé d’objet dans le bucket (sans `/` en tête). Accepte aussi une URL complète Supabase Storage
  * si `file_path` a été copié depuis le dashboard ou une réponse API.

@@ -1,0 +1,52 @@
+.localized-date-picker {
+  width: 100%;
+  min-width: 0;
+}
+
+.localized-date-picker__trigger {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  background: #fff;
+  color: #111827;
+  -webkit-text-fill-color: #111827;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  min-height: 38px;
+  font-family: inherit;
+}
+
+.localized-date-picker__trigger span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.localized-date-picker__popover {
+  z-index: 10050;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.15);
+  padding: 8px;
+  max-width: calc(100vw - 16px);
+}
+
+/* Légère adaptation du thème par défaut du DayPicker dans nos modals */
+.localized-date-picker__popover .rdp-root {
+  --rdp-accent-color: #f59e0b;
+  --rdp-accent-background-color: #fff7ed;
+  font-size: 0.85rem;
+}
+
+.localized-date-picker__popover .rdp-dropdown {
+  font-size: 0.78rem;
+}

@@ -5,15 +5,25 @@
   background:
     radial-gradient(circle at 70% 14%, rgba(255, 157, 0, 0.25), transparent 24%),
     linear-gradient(180deg, #070d1c 0%, #050912 100%);
-  padding-left: env(safe-area-inset-left, 0px);
-  padding-right: env(safe-area-inset-right, 0px);
+  /* Gouttière gérée uniquement par .nav / .content (évite décalage gauche/droite) */
+  overflow-x: clip;
+  box-sizing: border-box;
 }
 
 .nav,
 .content {
   max-width: 1200px;
   margin: 0 auto;
-  padding-inline: 24px;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  /* Physique L/R : évite tout décalage selon les moteurs (inline vs LTR) */
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+}
+
+.content {
+  overflow-x: clip;
 }
 
 .nav {
@@ -22,12 +32,16 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 10px;
+  column-gap: 12px;
 }
 
 .logo {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .logo-mark {
@@ -117,11 +131,16 @@
 
 .hero {
   display: grid;
-  grid-template-columns: 1.05fr 0.95fr;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
   gap: 42px;
   align-items: center;
   min-height: 560px;
   animation: fade-up 0.6s ease both;
+}
+
+.hero-text,
+.hero-visual {
+  min-width: 0;
 }
 
 .tag {
@@ -168,7 +187,8 @@
   padding: 0;
   list-style: none;
   display: flex;
-  gap: 20px;
+  flex-wrap: wrap;
+  gap: 10px 20px;
   color: rgba(237, 242, 255, 0.68);
   font-size: 0.85rem;
 }
@@ -198,6 +218,8 @@
   background: #f4f5f8;
   border-radius: 20px;
   padding: 44px 24px 22px;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .chip {
@@ -235,6 +257,8 @@
   background: #fff;
   padding: 16px 18px;
   text-align: left;
+  min-width: 0;
+  overflow-wrap: anywhere;
   transition:
     transform 0.2s ease,
     box-shadow 0.2s ease,
@@ -257,6 +281,8 @@
   display: flex;
   justify-content: space-between;
   gap: 8px;
+  align-items: flex-start;
+  min-width: 0;
 }
 
 .feature-head h3 {
@@ -265,6 +291,8 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .feature-head span {
@@ -315,8 +343,10 @@
   color: #6b7280;
   font-size: 0.85rem;
   line-height: 1.4;
-  max-width: 42ch;
+  max-width: min(42ch, 100%);
   margin: 0 auto;
+  padding-inline: 4px;
+  box-sizing: border-box;
 }
 
 .pricing-section {
@@ -324,9 +354,14 @@
   border-radius: 20px;
   background: #f4f5f8;
   color: #0f172a;
-  padding: 40px 24px 28px;
+  padding: 40px clamp(14px, 4vw, 22px) 28px;
   text-align: center;
   border: 1px solid #e5e7eb;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: clip;
 }
 
 .pricing-label {
@@ -358,31 +393,44 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
+  row-gap: 16px;
   text-align: left;
   align-items: stretch;
   position: relative;
   z-index: 0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .pricing-card {
   position: relative;
-  z-index: 0;
+  z-index: auto;
   border-radius: 16px;
   background: #fff;
-  padding: 22px 18px 18px;
+  padding: 22px 14px 18px;
   border: 2px solid #e5e7eb;
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.07);
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  /* Pas de min-height % : sur grille 1 colonne / WebKit ça peut mal calculer la hauteur de ligne et chevaucher */
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   transition:
     transform 0.2s ease,
     box-shadow 0.2s ease;
 }
 
-.pricing-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.1);
+@media (hover: hover) and (pointer: fine) {
+  .pricing-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 36px rgba(15, 23, 42, 0.1);
+  }
 }
 
 .pricing-card--blue {
@@ -399,21 +447,22 @@
 
 .pricing-card--featured {
   border-color: #f59e0b;
-  padding-top: 28px;
+  padding-top: 20px;
   box-shadow:
     0 12px 32px rgba(245, 158, 11, 0.15),
     0 10px 28px rgba(15, 23, 42, 0.07);
 }
 
+/* Toujours dans le flux : le positionnement absolu + translate(-50%) faisait
+   chevaucher la carte du dessus (le gap de grille ne réserve pas l’espace du badge). */
 .pricing-card-badge {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  position: static;
+  align-self: center;
+  margin: 0 0 12px;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 10px;
+  padding: 5px 12px;
   border-radius: 999px;
   background: linear-gradient(135deg, #f59e0b, #ea580c);
   color: #fff;
@@ -422,7 +471,7 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   box-shadow: 0 4px 12px rgba(234, 88, 12, 0.35);
-  z-index: 1;
+  flex-shrink: 0;
 }
 
 .pricing-card-pill {
@@ -496,6 +545,12 @@
   color: #334155;
   margin-bottom: 8px;
   line-height: 1.4;
+  min-width: 0;
+}
+
+.pricing-card-features li span {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .pricing-card-features li:last-child {
@@ -512,19 +567,24 @@
   display: block;
   text-align: center;
   margin-top: auto;
-  padding: 11px 14px;
+  padding: 11px 12px;
   border-radius: 11px;
   font-weight: 700;
   font-size: 0.88rem;
   text-decoration: none;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
   transition:
     transform 0.18s ease,
     filter 0.18s ease;
 }
 
-.pricing-card-cta:hover {
-  transform: translateY(-1px);
-  filter: brightness(1.03);
+@media (hover: hover) and (pointer: fine) {
+  .pricing-card-cta:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.03);
+  }
 }
 
 .pricing-card-cta--blue {
@@ -670,9 +730,24 @@
     min-height: auto;
   }
 
-  .feature-grid,
-  .pricing-grid {
+  .feature-grid {
     grid-template-columns: 1fr;
+  }
+
+  /* Colonne flex + gap explicite (évite chevauchements grille sur certains navigateurs) */
+  .pricing-grid {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2rem;
+    width: 100%;
+    padding-top: 8px;
+  }
+
+  .pricing-grid .pricing-card {
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: 100%;
   }
 
   /* 2×2 : meilleur alignement sur mobile que 4 lignes étroites */
@@ -685,17 +760,19 @@
 
   .stats div {
     background: #fff;
-    padding: 16px 12px;
+    padding: 16px 14px;
   }
 
-  .pricing-grid {
-    gap: 36px;
-    padding-top: 16px;
+  .stats span {
+    max-width: 100%;
+  }
+
+  .features {
+    padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px));
   }
 
   .pricing-section {
-    padding-inline: 18px;
-    padding-bottom: 36px;
+    padding: 36px clamp(14px, 4vw, 20px) 32px;
   }
 
   .hero h1 {
@@ -704,27 +781,50 @@
 }
 
 @media (max-width: 640px) {
+  .nav,
+  .content {
+    padding-left: max(14px, env(safe-area-inset-left, 0px));
+    padding-right: max(14px, env(safe-area-inset-right, 0px));
+  }
+
+  .pricing-section {
+    padding: 32px clamp(12px, 5vw, 18px) 28px;
+  }
+
+  .pricing-card {
+    padding-left: max(12px, 3vw);
+    padding-right: max(12px, 3vw);
+  }
+
+  /* Ne pas fixer les CTA : évite de masquer le mock dashboard / graphiques */
   .hero-actions {
-    position: fixed;
-    left: 14px;
-    right: 14px;
-    bottom: 14px;
-    z-index: 30;
-    margin: 0;
-    padding: 10px;
-    border-radius: 12px;
-    background: rgba(7, 13, 28, 0.88);
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    backdrop-filter: blur(6px);
+    position: relative;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    z-index: auto;
+    margin-top: 20px;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    border: 0;
+    backdrop-filter: none;
+    flex-wrap: wrap;
+    gap: 10px;
   }
 
   .hero-actions .btn {
-    flex: 1;
+    flex: 1 1 140px;
     text-align: center;
     justify-content: center;
+    min-height: 44px;
+  }
+
+  .hero-visual {
+    margin-bottom: 4px;
   }
 
   .content {
-    padding-bottom: 110px;
+    padding-bottom: 56px;
   }
 }

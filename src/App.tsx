@@ -14,6 +14,8 @@ function App() {
             <Route path="/connexion" element={<LoginPage />} />
             <Route path="/inscription" element={<LoginPage />} />
             <Route path="/app" element={<Navigate to="/app/dashboard" replace />} />
+            <Route path="/app/pricing" element={<Navigate to="/app/dashboard" replace />} />
+            <Route path="/app/carte" element={<Navigate to="/app/dashboard" replace />} />
             <Route path="/app/:section" element={<DashboardShell />} />
           </Routes>
         </div>

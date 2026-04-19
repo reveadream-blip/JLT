@@ -139,19 +139,82 @@
     max(14px, env(safe-area-inset-left));
 }
 
-.dashboard-mobile-extras {
-  display: none;
-}
-
 .dashboard-bottom-nav {
   display: none;
 }
 
 .dashboard-top {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.dashboard-top__left {
+  min-width: 0;
+}
+
+.dashboard-top__titles {
+  margin-bottom: 0;
+}
+
+.dashboard-top__meta {
+  display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 14px;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.dashboard-top__meta-left {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dashboard-top__company.invoice-profile-preview {
+  margin-top: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.dashboard-top__company.invoice-profile-preview > div {
+  min-width: 0;
+}
+
+@media (min-width: 1201px) {
+  .dashboard-top {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .dashboard-top__left {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .dashboard-top__meta {
+    margin-top: 8px;
+    justify-content: flex-start;
+  }
+
+  .dashboard-top__company.invoice-profile-preview {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .top-actions {
+    flex-shrink: 0;
+    align-self: flex-start;
+  }
 }
 
 .dashboard-top h1 {
@@ -168,6 +231,8 @@
 
 .top-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 
@@ -248,6 +313,7 @@
 
 .notifications-wrap {
   position: relative;
+  flex-shrink: 0;
 }
 
 .notifications-panel {
@@ -466,6 +532,26 @@ ul.notifications-list {
   border-radius: 10px;
   background: #fff;
   padding: 12px;
+}
+
+a.kpi-card--link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  box-sizing: border-box;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+a.kpi-card--link:hover {
+  border-color: #fbbf24;
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.12);
+}
+
+a.kpi-card--link:focus-visible {
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
 }
 
 .kpi-card p {
@@ -934,6 +1020,7 @@ ul.notifications-list {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
 }
 
 .vehicle-tab-header {
@@ -1164,6 +1251,10 @@ ul.notifications-list {
   border-radius: 12px;
   box-shadow: 0 10px 24px rgba(8, 23, 56, 0.06);
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: clip;
 }
 
 .vehicle-card:hover {
@@ -1235,6 +1326,10 @@ ul.notifications-list {
   display: flex;
   gap: 6px;
   margin-bottom: 8px;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .airtag-editor input {
@@ -1259,39 +1354,6 @@ ul.notifications-list {
 }
 
 .airtag-editor input:focus {
-  outline: none;
-  border-color: #e5e7eb;
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.22);
-}
-
-/* Page Carte : lat / lng — même reset que la recherche (pas de barres natives) */
-.carte-coords {
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.carte-coords input {
-  flex: 1 1 120px;
-  min-width: 0;
-  margin: 0;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 6px 8px;
-  font-size: 0.72rem;
-  color: #1f2937;
-  background: #fff;
-  -webkit-appearance: none;
-  appearance: none;
-  box-shadow: none;
-  outline: none;
-}
-
-.carte-coords input::placeholder {
-  color: #9ca3af;
-  opacity: 1;
-}
-
-.carte-coords input:focus {
   outline: none;
   border-color: #e5e7eb;
   box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.22);
@@ -1335,12 +1397,23 @@ ul.notifications-list {
   background: rgba(15, 23, 42, 0.45);
   display: grid;
   place-items: center;
+  align-content: center;
+  padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px))
+    max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   z-index: 60;
 }
 
 .modal-card {
-  width: min(520px, calc(100vw - 32px));
+  width: 100%;
+  max-width: min(520px, calc(100vw - 24px));
+  min-width: 0;
+  box-sizing: border-box;
   background: #fff;
+  color: #111827;
   border-radius: 12px;
   border: 1px solid #e5e7eb;
   padding: 14px;
@@ -1353,14 +1426,64 @@ ul.notifications-list {
   font-size: 1rem;
 }
 
+.modal-card--invoice {
+  gap: 10px;
+}
+
+.modal-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.modal-field label,
+.modal-field__static-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.modal-field__static-label {
+  display: block;
+}
+
+.invoice-modal-logo-preview {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px;
+  background: #f8fafc;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.invoice-modal-logo-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 100px;
+  margin: 0 auto;
+  object-fit: contain;
+}
+
+.invoice-profile-preview .invoice-profile-phone {
+  margin: 4px 0 0;
+  font-size: 0.72rem;
+  color: #64748b;
+}
+
 .modal-card input,
 .modal-card select,
 .modal-card textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 8px 10px;
   font-size: 0.85rem;
   background: #fff;
+  color: #111827;
+  -webkit-text-fill-color: #111827;
 }
 
 .modal-card textarea {
@@ -1391,21 +1514,69 @@ ul.notifications-list {
 }
 
 .modal-file-input {
+  position: relative;
   display: grid;
   gap: 6px;
   color: #475569;
   font-size: 0.85rem;
 }
 
-.modal-file-input input {
+/* Input natif masqué : les libellés « Choose file / No file chosen » viennent du navigateur (non traduisibles). */
+.modal-file-input__hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.modal-file-input__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
   border: 1px dashed #cbd5e1;
+  border-radius: 8px;
   background: #f8fafc;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.modal-file-input__pick {
+  flex-shrink: 0;
+  border: 1px solid #94a3b8;
+  border-radius: 6px;
+  background: #334155;
+  color: #fff;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modal-file-input__pick:hover {
+  filter: brightness(1.06);
+}
+
+.modal-file-input__status {
+  flex: 1 1 120px;
+  min-width: 0;
+  font-size: 0.78rem;
+  color: #64748b;
+  overflow-wrap: anywhere;
 }
 
 .modal-actions {
   margin-top: 6px;
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -1413,8 +1584,30 @@ ul.notifications-list {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #fff;
-  padding: 7px 10px;
+  color: #1f2937;
+  padding: 8px 14px;
   font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modal-actions button:hover:not(:disabled) {
+  background: #f8fafc;
+}
+
+.modal-actions button:last-of-type {
+  border: 0;
+  background: #f59e0b;
+  color: #fff;
+}
+
+.modal-actions button:last-of-type:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.modal-actions button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 .modal-hint {
@@ -1441,19 +1634,26 @@ ul.notifications-list {
 
 .photo-upload-btn {
   margin-top: 8px;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   border-radius: 9px;
   border: 1px solid #f59e0b;
   background: linear-gradient(135deg, #fff7ed, #fffbeb);
   color: #b45309;
-  padding: 7px 9px;
+  padding: 7px 8px;
   min-height: 40px;
   font-size: 0.73rem;
   font-weight: 700;
   cursor: pointer;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
 }
 
 .chips button {
@@ -1610,12 +1810,11 @@ ul.notifications-list {
     padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
   }
 
-  .dashboard-mobile-extras {
+  .dashboard-top__meta-left {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
-    margin-top: 10px;
   }
 
   .dashboard-mobile-back {
@@ -1716,14 +1915,21 @@ ul.notifications-list {
   }
 
   .dashboard-top {
-    flex-wrap: wrap;
-    align-items: flex-start;
+    flex-direction: column;
+    align-items: stretch;
     gap: 10px;
   }
 
   .top-actions {
     width: 100%;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+  }
+
+  .top-actions__settings,
+  .top-actions__primary {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: center;
   }
 
   /* Bouton cloche à gauche de la ligne : ancrer le panneau à gauche pour qu’il reste dans l’écran */
@@ -1823,10 +2029,14 @@ ul.notifications-list {
     width: 100%;
     overflow-x: auto;
     padding-bottom: 2px;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
   }
 
   .chips button {
     white-space: nowrap;
+    flex-shrink: 0;
   }
 }
 
@@ -1835,10 +2045,13 @@ ul.notifications-list {
     font-size: 1.05rem;
   }
 
-  .top-actions .ghost-btn,
-  .top-actions .accent-btn {
-    width: 100%;
-    justify-content: center;
+  .top-actions .top-actions__settings,
+  .top-actions .top-actions__primary {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-left: 8px;
+    padding-right: 8px;
+    font-size: 0.72rem;
   }
 
   .airtag-editor {
@@ -1855,13 +2068,3 @@ ul.notifications-list {
   }
 }
 
-/* Carte Thaïlande (page Carte) : grande hauteur pour mieux voir le pays en entier */
-.carte-map-embed {
-  display: block;
-  width: 100%;
-  min-height: 420px;
-  height: min(620px, 72vh);
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06);
-}

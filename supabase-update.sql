@@ -100,6 +100,9 @@ alter table public.inspection_photos add column if not exists owner_id uuid;
 alter table public.contracts add column if not exists start_at timestamptz;
 alter table public.contracts add column if not exists end_at timestamptz;
 alter table public.vehicles add column if not exists airtag_code text;
+alter table public.clients add column if not exists passport_number text;
+alter table public.clients add column if not exists nationality text;
+alter table public.clients add column if not exists passport_photo_path text;
 
 -- =========================================================
 -- Indexes

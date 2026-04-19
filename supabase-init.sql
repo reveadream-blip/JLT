@@ -21,6 +21,7 @@ create table if not exists public.clients (
   phone text,
   email text,
   passport_number text,
+  passport_photo_path text,
   deposit_amount numeric(10,2) default 0,
   notes text,
   created_at timestamptz not null default now()

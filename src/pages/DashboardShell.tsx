@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -14,15 +15,13 @@ import {
   Car,
   ClipboardList,
   CreditCard,
-  Globe,
   LayoutDashboard,
   Plus,
   Search,
   Users,
-  Wallet,
 } from 'lucide-react'
 import { jsPDF } from 'jspdf'
-import { localeOptions, useI18n, type Locale } from '../lib/i18n'
+import { localeOptions, useI18n } from '../lib/i18n'
 import { Link, NavLink, useParams, useSearchParams } from 'react-router-dom'
 import {
   supabase,
@@ -31,8 +30,11 @@ import {
   vehicleIdFromVehiclePhotoPath,
   vehiclePhotosUsePublicUrl,
   buildVehiclePhotoStoragePath,
+  clientPassportPhotosBucket,
+  buildClientPassportPhotoPath,
 } from '../lib/supabase'
 import './DashboardShell.css'
+import { LocalizedDatePicker } from '../components/LocalizedDatePicker'
 
 /** Démo publique : connexion anonyme + accès sans abonnement (voir VITE_PUBLIC_DEMO_MODE). */
 const isPublicDemoMode = import.meta.env.VITE_PUBLIC_DEMO_MODE === 'true'
@@ -41,13 +43,71 @@ function normalizeVehicleLabel(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
-/**
- * Carte centrée sur la Thaïlande — `hl` aligne l’UI Google Maps et les toponymes
- * sur la langue de l’utilisateur (où Google fournit des libellés traduits).
- */
-function thailandMapEmbedUrl(locale: Locale) {
-  const hl = encodeURIComponent(locale)
-  return `https://www.google.com/maps?ll=13.75%2C100.5&z=6&hl=${hl}&t=m&output=embed`
+/** Nombre de jours facturés (aligné sur la facture PDF : au moins 1 jour si fin > début). */
+function contractBillableDaysCount(startIso: string, endIso: string): number | null {
+  if (!startIso || !endIso) return null
+  const start = new Date(startIso)
+  const end = new Date(endIso)
+  if (Number.isNaN(+start) || Number.isNaN(+end) || end <= start) return null
+  const dayMs = 1000 * 60 * 60 * 24
+  return Math.max(1, Math.ceil((+end - +start) / dayMs))
+}
+
+function isoDateLocal(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function parseLocalDate(isoYmd: string): Date {
+  const [y, m, day] = isoYmd.slice(0, 10).split('-').map(Number)
+  return new Date(y, m - 1, day, 12, 0, 0, 0)
+}
+
+function addDaysLocal(isoYmd: string, days: number): string {
+  const d = parseLocalDate(isoYmd)
+  d.setDate(d.getDate() + days)
+  return isoDateLocal(d)
+}
+
+/** Chevauchement (jours facturables) entre contrat [cStart,cEnd] et période [rStart, rEndExcl). */
+function overlapBillableDaysInRange(
+  cStartIso: string,
+  cEndIso: string,
+  rangeStartInclusive: string,
+  rangeEndExclusive: string,
+): number {
+  const cs = +parseLocalDate(cStartIso.slice(0, 10))
+  const ce = +parseLocalDate(cEndIso.slice(0, 10))
+  const rs = +parseLocalDate(rangeStartInclusive.slice(0, 10))
+  const re = +parseLocalDate(rangeEndExclusive.slice(0, 10))
+  const start = Math.max(cs, rs)
+  const end = Math.min(ce, re)
+  if (end <= start) return 0
+  return contractBillableDaysCount(isoDateLocal(new Date(start)), isoDateLocal(new Date(end))) ?? 0
+}
+
+/** Période d’analyse : 0 = 7 jours, 1 = 30 jours, 2–4 = 3 / 6 / 12 mois (calendaires). */
+function dateRangeForAnalysisPeriodChip(index: number): { start: string; end: string } {
+  const now = new Date()
+  now.setHours(12, 0, 0, 0)
+  if (index === 0) {
+    const end = new Date(now)
+    const start = new Date(now)
+    start.setDate(start.getDate() - 6)
+    return { start: isoDateLocal(start), end: isoDateLocal(end) }
+  }
+  if (index === 1) {
+    const end = new Date(now)
+    const start = new Date(now)
+    start.setDate(start.getDate() - 29)
+    return { start: isoDateLocal(start), end: isoDateLocal(end) }
+  }
+  const monthSpan = index === 2 ? 3 : index === 3 ? 6 : 12
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+  const start = new Date(now.getFullYear(), now.getMonth() - (monthSpan - 1), 1)
+  return { start: isoDateLocal(start), end: isoDateLocal(end) }
 }
 
 const menuMeta = [
@@ -56,9 +116,7 @@ const menuMeta = [
   { key: 'clients', icon: Users },
   { key: 'contrats', icon: ClipboardList },
   { key: 'planning', icon: Calendar },
-  { key: 'pricing', icon: Wallet },
   { key: 'abonnement', icon: CreditCard },
-  { key: 'carte', icon: Globe },
 ]
 
 type VehicleTypeFilter = 'all' | 'scooter' | 'car' | 'bike'
@@ -79,6 +137,9 @@ type ClientRow = {
   full_name: string
   phone: string | null
   email: string | null
+  passport_number?: string | null
+  nationality?: string | null
+  passport_photo_path?: string | null
 }
 type ContractRow = {
   id: string
@@ -90,6 +151,154 @@ type ContractRow = {
   status: 'draft' | 'active' | 'completed' | 'cancelled'
   created_at: string
 }
+
+/** Tarif journalier : prix du véhicule (référence), sinon dérivé du total (fallback seulement). */
+function contractDailyRate(contract: ContractRow, vehicle: VehicleRow | undefined): number {
+  const fromVehicle = Number(vehicle?.daily_price ?? 0)
+  if (fromVehicle > 0) return fromVehicle
+  const cStart = String(contract.start_at || '').slice(0, 10)
+  const cEnd = String(contract.end_at || '').slice(0, 10)
+  const totalDays = contractBillableDaysCount(cStart, cEnd)
+  if (totalDays === null || totalDays < 1) return 0
+  return Math.round((Number(contract.total_price ?? 0) / totalDays) * 100) / 100
+}
+
+/** Revenu = journalier × jours de chevauchement (pas total ÷ jours × …). */
+function contractRevenueDailyTimesOverlap(
+  contract: ContractRow,
+  vehicle: VehicleRow | undefined,
+  overlapDays: number,
+): number {
+  if (contract.status === 'cancelled' || overlapDays < 1) return 0
+  const daily = contractDailyRate(contract, vehicle)
+  if (daily <= 0) return 0
+  return Math.round(daily * overlapDays)
+}
+
+function contractRevenueInAnalysisRange(
+  contract: ContractRow,
+  vehicle: VehicleRow | undefined,
+  rangeStartInclusive: string,
+  rangeEndInclusive: string,
+): number {
+  if (contract.status === 'cancelled') return 0
+  const cStart = String(contract.start_at || '').slice(0, 10)
+  const cEnd = String(contract.end_at || '').slice(0, 10)
+  const rangeEndExcl = addDaysLocal(rangeEndInclusive, 1)
+  const od = overlapBillableDaysInRange(cStart, cEnd, rangeStartInclusive, rangeEndExcl)
+  return contractRevenueDailyTimesOverlap(contract, vehicle, od)
+}
+
+type DashboardRevenuePoint = {
+  label: string
+  date: string
+  isoDate: string
+  amount: number
+  contracts: number
+}
+
+/** Revenus sur la période (journalier × jours) et points pour le graphique (jour si 7j/30j, sinon mois). */
+function buildDashboardRevenueSeries(
+  contractsData: ContractRow[],
+  vehiclesData: VehicleRow[],
+  rangeStartInclusive: string,
+  rangeEndInclusive: string,
+  periodIndex: number,
+): { buckets: DashboardRevenuePoint[]; periodTotal: number; periodContractCount: number } {
+  const rangeEndExcl = addDaysLocal(rangeEndInclusive, 1)
+  const vehicleById = new Map(vehiclesData.map((v) => [v.id, v]))
+
+  let periodTotal = 0
+  let periodContractCount = 0
+  for (const row of contractsData) {
+    if (row.status === 'cancelled') continue
+    const cStart = String(row.start_at || '').slice(0, 10)
+    const cEnd = String(row.end_at || '').slice(0, 10)
+    const od = overlapBillableDaysInRange(cStart, cEnd, rangeStartInclusive, rangeEndExcl)
+    if (od < 1) continue
+    periodContractCount += 1
+    periodTotal += contractRevenueInAnalysisRange(row, vehicleById.get(row.vehicle_id), rangeStartInclusive, rangeEndInclusive)
+  }
+
+  const buckets: DashboardRevenuePoint[] = []
+  const useDaily = periodIndex <= 1
+
+  if (useDaily) {
+    const cur = parseLocalDate(rangeStartInclusive)
+    const end = parseLocalDate(rangeEndInclusive)
+    while (cur <= end) {
+      const dayIso = isoDateLocal(cur)
+      const dayEndExcl = addDaysLocal(dayIso, 1)
+      let amount = 0
+      let contracts = 0
+      for (const row of contractsData) {
+        if (row.status === 'cancelled') continue
+        const cStart = String(row.start_at || '').slice(0, 10)
+        const cEnd = String(row.end_at || '').slice(0, 10)
+        const totalDays = contractBillableDaysCount(cStart, cEnd)
+        if (totalDays === null || totalDays < 1) continue
+        const od = overlapBillableDaysInRange(cStart, cEnd, dayIso, dayEndExcl)
+        if (od < 1) continue
+        const vehicle = vehicleById.get(row.vehicle_id)
+        amount += contractRevenueDailyTimesOverlap(row, vehicle, od)
+        contracts += 1
+      }
+      const label = new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: 'short' }).format(
+        parseLocalDate(dayIso),
+      )
+      buckets.push({
+        label,
+        date: parseLocalDate(dayIso).toLocaleDateString('fr-FR'),
+        isoDate: dayIso,
+        amount,
+        contracts,
+      })
+      cur.setDate(cur.getDate() + 1)
+    }
+  } else {
+    const start = parseLocalDate(rangeStartInclusive)
+    const end = parseLocalDate(rangeEndInclusive)
+    const iter = new Date(start.getFullYear(), start.getMonth(), 1)
+    const endMonth = new Date(end.getFullYear(), end.getMonth(), 1)
+    while (iter <= endMonth) {
+      const y = iter.getFullYear()
+      const m = iter.getMonth()
+      const monthStart = new Date(y, m, 1)
+      const monthEnd = new Date(y, m + 1, 0)
+      let ms = isoDateLocal(monthStart)
+      let me = isoDateLocal(monthEnd)
+      if (ms < rangeStartInclusive.slice(0, 10)) ms = rangeStartInclusive.slice(0, 10)
+      if (me > rangeEndInclusive.slice(0, 10)) me = rangeEndInclusive.slice(0, 10)
+      const monthEndExcl = addDaysLocal(me, 1)
+      let amount = 0
+      let contracts = 0
+      for (const row of contractsData) {
+        if (row.status === 'cancelled') continue
+        const cStart = String(row.start_at || '').slice(0, 10)
+        const cEnd = String(row.end_at || '').slice(0, 10)
+        const totalDays = contractBillableDaysCount(cStart, cEnd)
+        if (totalDays === null || totalDays < 1) continue
+        const od = overlapBillableDaysInRange(cStart, cEnd, ms, monthEndExcl)
+        if (od < 1) continue
+        const vehicle = vehicleById.get(row.vehicle_id)
+        amount += contractRevenueDailyTimesOverlap(row, vehicle, od)
+        contracts += 1
+      }
+      const formatter = new Intl.DateTimeFormat('fr-FR', { month: 'short', year: '2-digit' })
+      buckets.push({
+        label: formatter.format(monthStart),
+        date: parseLocalDate(me).toLocaleDateString('fr-FR'),
+        isoDate: me,
+        amount,
+        contracts,
+      })
+      iter.setMonth(iter.getMonth() + 1)
+    }
+  }
+
+  return { buckets, periodTotal, periodContractCount }
+}
+
 type PricingPlanRow = {
   id: string
   label: string
@@ -126,7 +335,42 @@ type EditModalState = {
 type InvoiceProfile = {
   companyName: string
   companyAddress: string
+  companyPhone: string
   logoDataUrl: string
+}
+
+const defaultInvoiceProfile: InvoiceProfile = {
+  companyName: 'JLT - JUST LEASE TECH',
+  companyAddress: 'Thailand',
+  companyPhone: '',
+  logoDataUrl: '',
+}
+
+function parseInvoiceProfile(raw: unknown): InvoiceProfile {
+  if (!raw || typeof raw !== 'object') {
+    return { ...defaultInvoiceProfile }
+  }
+  const o = raw as Record<string, unknown>
+  const pickStr = (a: unknown, b: unknown) => {
+    const v = (typeof a === 'string' ? a : '') || (typeof b === 'string' ? b : '')
+    return v
+  }
+  return {
+    companyName: pickStr(o.companyName, o.company_name) || defaultInvoiceProfile.companyName,
+    companyAddress: pickStr(o.companyAddress, o.company_address) || defaultInvoiceProfile.companyAddress,
+    companyPhone: pickStr(o.companyPhone, o.company_phone),
+    logoDataUrl: pickStr(o.logoDataUrl, o.logo_data_url),
+  }
+}
+
+function readInvoiceProfileFromStorage(): InvoiceProfile {
+  try {
+    const stored = localStorage.getItem('jlt-invoice-profile')
+    if (!stored) return { ...defaultInvoiceProfile }
+    return parseInvoiceProfile(JSON.parse(stored) as unknown)
+  } catch {
+    return { ...defaultInvoiceProfile }
+  }
 }
 
 async function compressImageFile(file: File): Promise<File> {
@@ -171,6 +415,16 @@ async function fileToDataUrl(file: File): Promise<string> {
   })
 }
 
+/** Dimensions image pour logo PDF (ratio conservé, pas d’étirement). */
+function pdfLoadImageDimensions(dataUrl: string): Promise<{ w: number; h: number } | null> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight })
+    img.onerror = () => resolve(null)
+    img.src = dataUrl
+  })
+}
+
 function DashboardHome({
   app,
   selectedType,
@@ -189,75 +443,28 @@ function DashboardHome({
   revisionsData: VehicleRevisionRow[]
 }) {
   const d = app.dashboard
-  type RevenuePoint = {
-    label: string
-    date: string
-    isoDate: string
-    amount: number
-    contracts: number
-  }
-  const defaultRevenueTimeline: RevenuePoint[] = (() => {
-    const now = new Date()
-    const formatter = new Intl.DateTimeFormat('en', { month: 'short', year: '2-digit' })
-    return Array.from({ length: 6 }).map((_, index) => {
-      const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1)
-      return {
-        label: formatter.format(date),
-        date: new Date(date.getFullYear(), date.getMonth() + 1, 0).toLocaleDateString('fr-FR'),
-        isoDate: new Date(date.getFullYear(), date.getMonth() + 1, 0).toISOString().slice(0, 10),
-        amount: 0,
-        contracts: 0,
-      }
-    })
-  })()
-  const [revenueTimeline, setRevenueTimeline] = useState<RevenuePoint[]>(defaultRevenueTimeline)
-  const [activeRevenueIndex, setActiveRevenueIndex] = useState(revenueTimeline.length - 1)
   const [activePeriodIndex, setActivePeriodIndex] = useState(3)
-  const [selectedStartDate, setSelectedStartDate] = useState(defaultRevenueTimeline[0].isoDate)
-  const [selectedEndDate, setSelectedEndDate] = useState(
-    defaultRevenueTimeline[defaultRevenueTimeline.length - 1].isoDate,
-  )
-  useEffect(() => {
-    const now = new Date()
-    const buckets = Array.from({ length: 6 }).map((_, index) => {
-      const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1)
-      return {
-        key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
-        date,
-        amount: 0,
-        contracts: 0,
-      }
-    })
-    const bucketMap = new Map(buckets.map((bucket) => [bucket.key, bucket]))
-    contractsData.forEach((row) => {
-      if (!row.start_at || row.status === 'cancelled') return
-      const date = new Date(row.start_at)
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-      const bucket = bucketMap.get(key)
-      if (!bucket) return
-      bucket.amount += Number(row.total_price ?? 0)
-      bucket.contracts += 1
-    })
+  const [selectedStartDate, setSelectedStartDate] = useState(() => dateRangeForAnalysisPeriodChip(3).start)
+  const [selectedEndDate, setSelectedEndDate] = useState(() => dateRangeForAnalysisPeriodChip(3).end)
+  const [activeRevenueIndex, setActiveRevenueIndex] = useState(0)
 
-    const formatter = new Intl.DateTimeFormat('en', { month: 'short', year: '2-digit' })
-    const nextTimeline: RevenuePoint[] = buckets.map((bucket) => ({
-      label: formatter.format(bucket.date),
-      date: new Date(bucket.date.getFullYear(), bucket.date.getMonth() + 1, 0).toLocaleDateString('fr-FR'),
-      isoDate: new Date(bucket.date.getFullYear(), bucket.date.getMonth() + 1, 0).toISOString().slice(0, 10),
-      amount: Math.round(bucket.amount),
-      contracts: bucket.contracts,
-    }))
-    setRevenueTimeline(nextTimeline)
-    setActiveRevenueIndex(nextTimeline.length - 1)
-  }, [contractsData])
-
-  const periodSpanMap = [2, 3, 4, 6, 6, 6]
-  const rangedRevenueTimeline = revenueTimeline.filter(
-    (item) => item.isoDate >= selectedStartDate && item.isoDate <= selectedEndDate,
+  const { buckets: revenueBuckets, periodTotal, periodContractCount } = useMemo(
+    () =>
+      buildDashboardRevenueSeries(contractsData, vehiclesData, selectedStartDate, selectedEndDate, activePeriodIndex),
+    [contractsData, vehiclesData, selectedStartDate, selectedEndDate, activePeriodIndex],
   )
-  const visibleRevenueTimeline = rangedRevenueTimeline.length
-    ? rangedRevenueTimeline.slice(-Math.min(periodSpanMap[activePeriodIndex], rangedRevenueTimeline.length))
-    : revenueTimeline.slice(-1)
+  const visibleRevenueTimeline =
+    revenueBuckets.length > 0
+      ? revenueBuckets
+      : [
+          {
+            label: '—',
+            date: '',
+            isoDate: selectedStartDate,
+            amount: 0,
+            contracts: 0,
+          },
+        ]
   const revenuePoints = visibleRevenueTimeline.map((item) => item.amount)
   const maxPoint = Math.max(...revenuePoints)
   const minPoint = Math.min(...revenuePoints)
@@ -314,20 +521,36 @@ function DashboardHome({
     )
   }, [visibleRevenueTimeline.length])
   useEffect(() => {
-    if (!revenueTimeline.length) return
-    const minDate = revenueTimeline[0].isoDate
-    const maxDate = revenueTimeline[revenueTimeline.length - 1].isoDate
-    setSelectedStartDate((prev) => (prev < minDate || prev > maxDate ? minDate : prev))
-    setSelectedEndDate((prev) => (prev > maxDate || prev < minDate ? maxDate : prev))
-  }, [revenueTimeline])
+    setActiveRevenueIndex(Math.max(0, revenueBuckets.length - 1))
+  }, [selectedStartDate, selectedEndDate, activePeriodIndex])
 
   const activeContractsCount = contractsData.filter((row) => row.status === 'active').length
   const availableVehiclesCount = vehiclesData.filter((row) => row.status === 'available').length
-  const kpiCards = [
-    { label: app.menu[1], value: String(vehiclesData.length), hint: `${availableVehiclesCount} ${d.available}` },
-    { label: d.activeContracts.toUpperCase(), value: String(activeContractsCount), hint: ' ' },
-    { label: app.menu[2], value: String(clientsData.length), hint: d.registered },
-    { label: d.revenueTitle.toUpperCase(), value: `฿${activeRevenue.amount}`, hint: d.selectedPeriod },
+  const kpiCards: Array<{
+    label: string
+    value: string
+    hint: string
+    linkTo?: string
+  }> = [
+    {
+      label: app.menu[1],
+      value: String(vehiclesData.length),
+      hint: `${availableVehiclesCount} ${d.available}`,
+      linkTo: '/app/vehicules',
+    },
+    {
+      label: d.activeContracts.toUpperCase(),
+      value: String(activeContractsCount),
+      hint: ' ',
+      linkTo: '/app/contrats',
+    },
+    {
+      label: app.menu[2],
+      value: String(clientsData.length),
+      hint: d.registered,
+      linkTo: '/app/clients',
+    },
+    { label: d.revenueTitle.toUpperCase(), value: `฿${periodTotal}`, hint: d.selectedPeriod },
   ]
   const [marketMetric, setMarketMetric] = useState<'contracts' | 'revenue'>('contracts')
   const colorByIndex = ['#f59e0b', '#3b82f6', '#14b8a6', '#8b5cf6', '#ef4444', '#22c55e']
@@ -335,11 +558,19 @@ function DashboardHome({
   const marketMap = new Map<string, { name: string; contracts: number; revenue: number }>()
   contractsData.forEach((contract) => {
     if (contract.status === 'cancelled') return
+    const overlapDays = overlapBillableDaysInRange(
+      String(contract.start_at || '').slice(0, 10),
+      String(contract.end_at || '').slice(0, 10),
+      selectedStartDate,
+      addDaysLocal(selectedEndDate, 1),
+    )
+    if (overlapDays < 1) return
     const vehicle = vehicleById.get(contract.vehicle_id)
+    const share = contractRevenueInAnalysisRange(contract, vehicle, selectedStartDate, selectedEndDate)
     const model = vehicle ? `${vehicle.brand} ${vehicle.model}` : contract.vehicle_id
     const existing = marketMap.get(model) || { name: model, contracts: 0, revenue: 0 }
     existing.contracts += 1
-    existing.revenue += Number(contract.total_price ?? 0)
+    existing.revenue += share
     marketMap.set(model, existing)
   })
   const marketShare = Array.from(marketMap.values())
@@ -445,13 +676,21 @@ function DashboardHome({
         </div>
       </section>
       <div className="kpi-row">
-        {kpiCards.map((item) => (
-          <article key={item.label} className="kpi-card">
-            <p>{item.label}</p>
-            <strong>{item.value}</strong>
-            <small>{item.hint}</small>
-          </article>
-        ))}
+        {kpiCards.map((item) =>
+          item.linkTo ? (
+            <Link key={item.label} to={item.linkTo} className="kpi-card kpi-card--link">
+              <p>{item.label}</p>
+              <strong>{item.value}</strong>
+              <small>{item.hint}</small>
+            </Link>
+          ) : (
+            <article key={item.label} className="kpi-card">
+              <p>{item.label}</p>
+              <strong>{item.value}</strong>
+              <small>{item.hint}</small>
+            </article>
+          ),
+        )}
       </div>
 
       <section className="analysis-card">
@@ -464,7 +703,12 @@ function DashboardHome({
                   key={label}
                   type="button"
                   className={index === activePeriodIndex ? 'active' : ''}
-                  onClick={() => setActivePeriodIndex(index)}
+                  onClick={() => {
+                    const { start, end } = dateRangeForAnalysisPeriodChip(index)
+                    setSelectedStartDate(start)
+                    setSelectedEndDate(end)
+                    setActivePeriodIndex(index)
+                  }}
                 >
                   {label}
                 </button>
@@ -498,8 +742,8 @@ function DashboardHome({
             <div className="row-between">
               <div>
                 <h3>{d.revenueTitle}</h3>
-                <strong>{`฿${activeRevenue.amount}`}</strong>
-                <p>{`${activeRevenue.contracts ?? 0} ${d.contractsCount}`}</p>
+                <strong>{`฿${periodTotal}`}</strong>
+                <p>{`${periodContractCount} ${d.contractsCount}`}</p>
               </div>
               <span className="danger-chip">{`-100% ${d.vsLastMonth}`}</span>
             </div>
@@ -1303,6 +1547,12 @@ function ClientsPage({
       {clientsData.map((client) => (
         <article key={client.id} className="list-item">
           <h4>{client.full_name}</h4>
+          <p>
+            {app.fieldNationality}: {client.nationality?.trim() || '—'}
+          </p>
+          <p>
+            {app.fieldPassportNumber}: {client.passport_number?.trim() || '—'}
+          </p>
           <p>{client.phone || '—'}</p>
           <p>{client.email || '—'}</p>
           <div className="row-actions">
@@ -1339,6 +1589,7 @@ function ContratsPage({
   invoiceProfile: {
     companyName: string
     companyAddress: string
+    companyPhone: string
     logoDataUrl: string
   }
   onEditContract: (contractId: string) => Promise<void>
@@ -1357,6 +1608,14 @@ function ContratsPage({
   const contracts = contractsData.map((contract) => {
     const client = clientById.get(contract.client_id)
     const vehicle = vehicleById.get(contract.vehicle_id)
+    const startYmd = String(contract.start_at || '').slice(0, 10)
+    const endYmd = String(contract.end_at || '').slice(0, 10)
+    const billedDays = contractBillableDaysCount(startYmd, endYmd) ?? 1
+    const totalPrice = Number(contract.total_price ?? 0)
+    const dailyPrice = Number(vehicle?.daily_price ?? 0)
+    const displayDaily = dailyPrice > 0 ? dailyPrice : billedDays > 0 ? Math.round((totalPrice / billedDays) * 100) / 100 : 0
+    const displayTotal =
+      dailyPrice > 0 ? Math.round(dailyPrice * billedDays) : totalPrice
     return {
       label: `${client?.full_name || app.entityClient} - ${vehicle ? `${vehicle.brand} ${vehicle.model}` : app.entityVehicle}`,
       clientName: client?.full_name || app.entityClient,
@@ -1368,8 +1627,13 @@ function ContratsPage({
       endAt: contract.end_at,
       id: contract.id,
       clientId: contract.client_id,
-      dailyPrice: Number(vehicle?.daily_price ?? 0),
-      totalPrice: Number(contract.total_price ?? 0),
+      dailyPrice,
+      totalPrice,
+      billedDays,
+      displayDaily,
+      displayTotal,
+      clientEmail: client?.email?.trim() || '',
+      clientPhone: client?.phone?.trim() || '',
     }
   })
   const filteredContracts = contracts.filter((contract) => {
@@ -1377,81 +1641,238 @@ function ContratsPage({
     const statusOk = selectedStatus === 'all' || contract.statusKey === selectedStatus
     return typeOk && statusOk
   })
-  const buildInvoiceDoc = (contract: (typeof filteredContracts)[number]) => {
-    const doc = new jsPDF()
-    const margin = 16
-    let y = 20
-    const dateFmt = (value: string) =>
-      value ? new Date(value).toLocaleDateString('fr-FR') : '-'
-    const computeDurationDays = (start: string, end: string) => {
-      if (!start || !end) return 1
-      const startDate = new Date(start)
-      const endDate = new Date(end)
-      if (Number.isNaN(+startDate) || Number.isNaN(+endDate) || endDate <= startDate) return 1
-      const dayMs = 1000 * 60 * 60 * 24
-      return Math.max(1, Math.ceil((+endDate - +startDate) / dayMs))
-    }
-    const billedDays = computeDurationDays(contract.startAt, contract.endAt)
-    const computedTotal = Math.round((contract.dailyPrice || 0) * billedDays)
-    const invoiceTotal = computedTotal > 0 ? computedTotal : contract.totalPrice
+  const buildInvoiceDoc = async (contract: (typeof filteredContracts)[number]) => {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+    const pageW = 210
+    const margin = 18
+    const contentW = pageW - margin * 2
+    const fmtMoney = (n: number) =>
+      n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const dateLong = (value: string) =>
+      value
+        ? new Date(value).toLocaleDateString('fr-FR', {
+            day: '2-digit',
+            month: 'long',
+            year: 'numeric',
+          })
+        : '—'
+
+    const startYmd = String(contract.startAt || '').slice(0, 10)
+    const endYmd = String(contract.endAt || '').slice(0, 10)
+    const billedDays = contractBillableDaysCount(startYmd, endYmd) ?? 1
+    const lineDaily = Number(contract.dailyPrice ?? 0)
+    const invoiceTotal =
+      lineDaily > 0 ? Math.round(lineDaily * billedDays) : contract.totalPrice
+
+    const companyName = invoiceProfile.companyName?.trim() || 'JLT - JUST LEASE TECH'
+    const companyAddr = invoiceProfile.companyAddress?.trim() || '—'
+    const companyPhone = invoiceProfile.companyPhone?.trim()
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    const addrLines = doc.splitTextToSize(companyAddr, 92)
+
+    let y = margin
+    const headerTop = y
+    let logoBottom = headerTop
 
     const logoData = invoiceProfile.logoDataUrl
     if (logoData) {
-      try {
-        doc.addImage(logoData, 'JPEG', 150, 12, 42, 20)
-      } catch {
+      const dims = await pdfLoadImageDimensions(logoData)
+      if (dims && dims.w > 0 && dims.h > 0) {
+        const maxW = 52
+        const maxH = 24
+        const scale = Math.min(maxW / dims.w, maxH / dims.h)
+        const lw = dims.w * scale
+        const lh = dims.h * scale
+        const lx = pageW - margin - lw
         try {
-          doc.addImage(logoData, 'PNG', 150, 12, 42, 20)
+          doc.addImage(logoData, 'JPEG', lx, headerTop, lw, lh)
         } catch {
-          // Ignore invalid image format for PDF logo.
+          try {
+            doc.addImage(logoData, 'PNG', lx, headerTop, lw, lh)
+          } catch {
+            /* logo invalide */
+          }
         }
+        logoBottom = headerTop + lh + 1
       }
     }
 
-    doc.setFontSize(18)
-    doc.text(invoiceProfile.companyName || 'JLT - JUST LEASE TECH', margin, y)
-    y += 10
-    doc.setFontSize(10)
-    doc.text(invoiceProfile.companyAddress || '-', margin, y)
-    y += 8
-    doc.setFontSize(14)
-    doc.text(app.invoiceTitle, margin, y)
-    y += 10
-    doc.setFontSize(11)
-    doc.text(`${app.invoiceNumber}: ${contract.id.slice(0, 8).toUpperCase()}`, margin, y)
-    y += 8
-    doc.text(`${app.invoiceClient}: ${contract.clientName}`, margin, y)
-    y += 8
-    doc.text(`${app.invoiceVehicle}: ${contract.vehicleName}`, margin, y)
-    y += 8
-    doc.text(`${app.invoiceStartDate}: ${dateFmt(contract.startAt)}`, margin, y)
-    y += 8
-    doc.text(`${app.invoiceEndDate}: ${dateFmt(contract.endAt)}`, margin, y)
-    y += 8
-    doc.text(`${app.invoiceStatus}: ${contract.status}`, margin, y)
-    y += 8
-    doc.text(`${app.fieldDailyPrice}: ${contract.dailyPrice.toFixed(2)} baths`, margin, y)
-    y += 8
-    doc.text(`${app.invoiceDays}: ${billedDays}`, margin, y)
-    y += 10
-    doc.setFontSize(13)
-    doc.text(`${app.invoiceTotal}: ${invoiceTotal.toFixed(2)} baths`, margin, y)
-    y += 16
-    doc.setFontSize(10)
-    doc.text(app.invoiceFooter, margin, y)
+    doc.setTextColor(15, 23, 42)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(16)
+    doc.text(companyName, margin, headerTop + 6)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9.5)
+    doc.setTextColor(71, 85, 105)
+    let ty = headerTop + 12
+    doc.text(addrLines, margin, ty)
+    ty += addrLines.length * 4.4
+    if (companyPhone) {
+      doc.text(`${app.fieldPhone}: ${companyPhone}`, margin, ty)
+      ty += 5
+    }
 
-    const filename = `invoice-${contract.id.slice(0, 8).toUpperCase()}.pdf`
+    y = Math.max(ty, logoBottom) + 7
+    doc.setDrawColor(203, 213, 225)
+    doc.setLineWidth(0.35)
+    doc.line(margin, y, pageW - margin, y)
+    y += 9
+
+    doc.setTextColor(15, 23, 42)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(22)
+    doc.text(app.invoiceTitle, margin, y)
+    y += 9
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(100, 116, 139)
+    const invRef = contract.id.slice(0, 8).toUpperCase()
+    doc.text(`${app.invoiceNumber}: ${invRef}`, margin, y)
+    const issueStr = new Date().toLocaleDateString('fr-FR', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    })
+    doc.text(`${app.invoiceIssueDate}: ${issueStr}`, pageW - margin, y, { align: 'right' })
+    y += 11
+
+    const pad = 5
+    const issuerBody =
+      6 +
+      5 +
+      addrLines.length * 4.4 +
+      (companyPhone ? 5 : 0) +
+      pad * 2
+    doc.setFillColor(248, 250, 252)
+    doc.setDrawColor(226, 232, 240)
+    doc.rect(margin, y, contentW, issuerBody, 'FD')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(10)
+    doc.setTextColor(15, 23, 42)
+    doc.text(app.invoiceSectionIssuer, margin + pad, y + 7)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9.5)
+    doc.setTextColor(51, 65, 85)
+    let iy = y + 13
+    doc.text(companyName, margin + pad, iy)
+    iy += 5
+    doc.text(addrLines, margin + pad, iy)
+    iy += addrLines.length * 4.4
+    if (companyPhone) {
+      doc.text(`${app.fieldPhone}: ${companyPhone}`, margin + pad, iy)
+    }
+    y += issuerBody + 7
+
+    const clientParts: string[] = [contract.clientName]
+    if (contract.clientEmail) clientParts.push(`${app.fieldEmail}: ${contract.clientEmail}`)
+    if (contract.clientPhone) clientParts.push(`${app.fieldPhone}: ${contract.clientPhone}`)
+    doc.setFontSize(9)
+    let clientH = 13
+    clientParts.forEach((line) => {
+      const w = doc.splitTextToSize(line, contentW - pad * 2)
+      clientH += w.length * 4.4
+    })
+    clientH += pad
+    doc.setFillColor(255, 251, 235)
+    doc.setDrawColor(253, 230, 138)
+    doc.rect(margin, y, contentW, clientH, 'FD')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(10)
+    doc.setTextColor(15, 23, 42)
+    doc.text(app.invoiceSectionClient, margin + pad, y + 7)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9.5)
+    doc.setTextColor(51, 65, 85)
+    let cy = y + 13
+    clientParts.forEach((line) => {
+      const wrapped = doc.splitTextToSize(line, contentW - pad * 2)
+      doc.text(wrapped, margin + pad, cy)
+      cy += wrapped.length * 4.4
+    })
+    y += clientH + 8
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(11)
+    doc.setTextColor(15, 23, 42)
+    doc.text(app.invoiceSectionRental, margin, y)
+    y += 8
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9.5)
+    doc.setTextColor(71, 85, 105)
+
+    const rowLabelVal = (label: string, value: string) => {
+      doc.setFont('helvetica', 'bold')
+      doc.text(label, margin, y)
+      doc.setFont('helvetica', 'normal')
+      const valueX = margin + 72
+      const vw = doc.splitTextToSize(value, pageW - margin - valueX)
+      doc.text(vw, valueX, y)
+      y += Math.max(6, vw.length * 4.2)
+    }
+
+    rowLabelVal(app.invoiceVehicle, contract.vehicleName)
+    rowLabelVal(app.invoiceStartDate, dateLong(contract.startAt))
+    rowLabelVal(app.invoiceEndDate, dateLong(contract.endAt))
+    rowLabelVal(app.invoiceStatus, contract.status)
+
+    y += 3
+    doc.setDrawColor(226, 232, 240)
+    doc.line(margin, y, pageW - margin, y)
+    y += 8
+
+    const tableTop = y
+    doc.setFillColor(241, 245, 249)
+    doc.rect(margin, y, contentW, 9, 'F')
+    doc.setDrawColor(226, 232, 240)
+    doc.rect(margin, tableTop, contentW, 22, 'S')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9)
+    doc.setTextColor(15, 23, 42)
+    doc.text(app.invoiceDays, margin + 3, y + 6)
+    doc.text(app.fieldDailyPrice, margin + 52, y + 6)
+    doc.text(`${app.invoiceTotal} (THB)`, pageW - margin - 3, y + 6, { align: 'right' })
+    y += 11
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9.5)
+    doc.setTextColor(51, 65, 85)
+    doc.text(String(billedDays), margin + 3, y + 5)
+    doc.text(`${fmtMoney(lineDaily)}`, margin + 52, y + 5)
+    doc.text(`${fmtMoney(invoiceTotal)}`, pageW - margin - 3, y + 5, { align: 'right' })
+    y += 14
+
+    doc.setFillColor(254, 243, 199)
+    doc.setDrawColor(251, 191, 36)
+    doc.setLineWidth(0.25)
+    doc.rect(margin, y, contentW, 14, 'FD')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(12)
+    doc.setTextColor(120, 53, 15)
+    doc.text(`${app.invoiceTotal} THB`, margin + 5, y + 9)
+    doc.text(`${fmtMoney(invoiceTotal)}`, pageW - margin - 5, y + 9, { align: 'right' })
+    y += 22
+
+    doc.setFont('helvetica', 'italic')
+    doc.setFontSize(8.5)
+    doc.setTextColor(148, 163, 184)
+    const foot = doc.splitTextToSize(app.invoiceFooter, contentW)
+    doc.text(foot, margin, Math.min(y, 268))
+
+    const filename = `invoice-${invRef}.pdf`
     return { doc, filename }
   }
   const onOpenInvoicePdf = (contract: (typeof filteredContracts)[number]) => {
     setInvoiceFeedback('')
-    const { doc } = buildInvoiceDoc(contract)
-    const blob = doc.output('blob')
-    const blobUrl = URL.createObjectURL(blob)
-    setInvoicePreviewUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev)
-      return blobUrl
-    })
+    void (async () => {
+      const { doc } = await buildInvoiceDoc(contract)
+      const blob = doc.output('blob')
+      const blobUrl = URL.createObjectURL(blob)
+      setInvoicePreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev)
+        return blobUrl
+      })
+    })()
   }
   const onSendInvoiceEmail = async (contract: (typeof filteredContracts)[number]) => {
     setInvoiceFeedback('')
@@ -1469,7 +1890,7 @@ function ContratsPage({
       return
     }
 
-    const { doc, filename } = buildInvoiceDoc(contract)
+    const { doc, filename } = await buildInvoiceDoc(contract)
     const pdfBlob = doc.output('blob')
     const filePath = `${ownerId}/contracts/${filename}`
     const { error: uploadError } = await supabase.storage
@@ -1505,6 +1926,12 @@ function ContratsPage({
             <p>
               {new Date(contract.startAt).toLocaleDateString('fr-FR')} -{' '}
               {new Date(contract.endAt).toLocaleDateString('fr-FR')}
+            </p>
+            <p className="contract-pricing-line">
+              {app.contractPricingSummary
+                .replace('{total}', String(contract.displayTotal))
+                .replace('{days}', String(contract.billedDays))
+                .replace('{daily}', String(contract.displayDaily))}
             </p>
             <div className="row-actions">
               <button type="button" onClick={() => void onEditContract(contract.id)}>
@@ -1628,56 +2055,6 @@ function PlanningPage({
   )
 }
 
-function PricingPage({
-  pricingPlansData,
-  onEditPricingPlan,
-  onDeletePricingPlan,
-}: {
-  pricingPlansData: PricingPlanRow[]
-  onEditPricingPlan: (planId: string) => Promise<void>
-  onDeletePricingPlan: (planId: string) => Promise<void>
-}) {
-  const { t } = useI18n()
-  const app = t('app')
-  const typeLabels = {
-    scooter: app.dashboard.vehicleTypes[0],
-    car: app.dashboard.vehicleTypes[1],
-    bike: app.dashboard.vehicleTypes[2],
-  } as const
-  const rows = pricingPlansData.map((plan) => ({
-    key: plan.id,
-    label: `${plan.label} · ${typeLabels[plan.vehicle_type]}`,
-    day: plan.day_rate,
-    week: plan.week_rate,
-    month: plan.month_rate,
-  }))
-  return (
-    <div className="list">
-      {rows.length > 0 ? (
-        rows.map((row) => (
-          <article key={row.key} className="list-item">
-            <h4>{row.label}</h4>
-            <p>
-              {app.rateLabels[0]}: ฿{row.day} | {app.rateLabels[1]}: ฿{row.week} | {app.rateLabels[2]}:{' '}
-              ฿{row.month}
-            </p>
-            <div className="row-actions">
-              <button type="button" onClick={() => void onEditPricingPlan(row.key)}>
-                {app.edit}
-              </button>
-              <button type="button" onClick={() => void onDeletePricingPlan(row.key)}>
-                {app.delete}
-              </button>
-            </div>
-          </article>
-        ))
-      ) : (
-        <p className="empty-state">{app.emptyPricing}</p>
-      )}
-    </div>
-  )
-}
-
 function AbonnementPage({
   app,
   currentSubscription,
@@ -1748,116 +2125,6 @@ function AbonnementPage({
   )
 }
 
-function CartePage({
-  app,
-  vehiclesData,
-}: {
-  app: any
-  vehiclesData: VehicleRow[]
-}) {
-  const { locale } = useI18n()
-  const [positions, setPositions] = useState<Record<string, { lat: string; lng: string }>>({})
-  useEffect(() => {
-    const raw = localStorage.getItem('jlt-airtag-positions')
-    if (!raw) return
-    try {
-      setPositions(JSON.parse(raw) as Record<string, { lat: string; lng: string }>)
-    } catch {
-      // Ignore malformed local storage.
-    }
-  }, [])
-  const onSavePosition = () => {
-    localStorage.setItem('jlt-airtag-positions', JSON.stringify(positions))
-  }
-  const onCopyFromFindMy = async (vehicle: VehicleRow) => {
-    const template = [
-      `${app.mapCopyTemplateTitle}: ${vehicle.brand} ${vehicle.model}`,
-      `${app.airtagPlaceholder}: ${vehicle.airtag_code || '-'}`,
-      `${app.mapLat}: `,
-      `${app.mapLng}: `,
-    ].join('\n')
-    try {
-      await navigator.clipboard.writeText(template)
-      window.open('https://www.icloud.com/find', '_blank', 'noopener,noreferrer')
-    } catch {
-      // Clipboard can fail on some browsers/contexts.
-    }
-  }
-  return (
-    <div className="list">
-      <article className="list-item">
-        <h4>{app.mapTitle}</h4>
-        <p>{app.mapSubtitle}</p>
-        <iframe
-          key={locale}
-          title="thailand-map"
-          src={thailandMapEmbedUrl(locale)}
-          className="carte-map-embed"
-        />
-      </article>
-      <article className="list-item">
-        <h4>AirTag</h4>
-        {vehiclesData.length === 0 && <p>{app.mapNoVehicles}</p>}
-        <div className="list">
-          {vehiclesData.map((vehicle) => {
-            const name = `${vehicle.brand} ${vehicle.model}`
-            const pos = positions[vehicle.id] || { lat: '', lng: '' }
-            const mapsLink =
-              pos.lat && pos.lng
-                ? `https://www.google.com/maps?q=${encodeURIComponent(`${pos.lat},${pos.lng}`)}&hl=${encodeURIComponent(locale)}`
-                : ''
-            return (
-              <article key={vehicle.id} className="contract-row">
-                <div>
-                  <h4>{name}</h4>
-                  <p>{`${app.airtagPlaceholder}: ${vehicle.airtag_code || '-'}`}</p>
-                  <div className="row-actions carte-coords">
-                    <input
-                      value={pos.lat}
-                      onChange={(event) =>
-                        setPositions((prev) => ({
-                          ...prev,
-                          [vehicle.id]: { ...pos, lat: event.target.value },
-                        }))
-                      }
-                      placeholder={app.mapLat}
-                      inputMode="decimal"
-                      autoComplete="off"
-                    />
-                    <input
-                      value={pos.lng}
-                      onChange={(event) =>
-                        setPositions((prev) => ({
-                          ...prev,
-                          [vehicle.id]: { ...pos, lng: event.target.value },
-                        }))
-                      }
-                      placeholder={app.mapLng}
-                      inputMode="decimal"
-                      autoComplete="off"
-                    />
-                    <button type="button" onClick={onSavePosition}>
-                      {app.mapSavePosition}
-                    </button>
-                    <button type="button" onClick={() => void onCopyFromFindMy(vehicle)}>
-                      {app.mapCopyFromFindMy}
-                    </button>
-                    {mapsLink && (
-                      <a href={mapsLink} target="_blank" rel="noreferrer">
-                        {app.mapOpenInMaps}
-                      </a>
-                    )}
-                  </div>
-                </div>
-              </article>
-            )
-          })}
-        </div>
-      </article>
-    </div>
-  )
-}
-
 function renderSection(
   section: string,
   app: any,
@@ -1869,7 +2136,6 @@ function renderSection(
   invoiceProfile: InvoiceProfile,
   clientsData: ClientRow[],
   contractsData: ContractRow[],
-  pricingPlansData: PricingPlanRow[],
   currentSubscription: BillingSubscriptionRow | null,
   pendingCheckoutCode: string,
   onStartCheckout: (planCode: string) => Promise<void>,
@@ -1891,8 +2157,6 @@ function renderSection(
   onDeleteClient: (clientId: string) => Promise<void>,
   onEditContract: (contractId: string) => Promise<void>,
   onDeleteContract: (contractId: string) => Promise<void>,
-  onEditPricingPlan: (planId: string) => Promise<void>,
-  onDeletePricingPlan: (planId: string) => Promise<void>,
 ) {
   switch (section) {
     case 'vehicules':
@@ -1943,14 +2207,6 @@ function renderSection(
           onDeleteContract={onDeleteContract}
         />
       )
-    case 'pricing':
-      return (
-        <PricingPage
-          pricingPlansData={pricingPlansData}
-          onEditPricingPlan={onEditPricingPlan}
-          onDeletePricingPlan={onDeletePricingPlan}
-        />
-      )
     case 'abonnement':
       return (
         <AbonnementPage
@@ -1961,8 +2217,6 @@ function renderSection(
           testModeEnabled={testModeEnabled}
         />
       )
-    case 'carte':
-      return <CartePage app={app} vehiclesData={vehiclesData} />
     default:
       return (
         <DashboardHome
@@ -1988,32 +2242,29 @@ export function DashboardShell() {
   const [searchQuery, setSearchQuery] = useState('')
   const [vehiclesData, setVehiclesData] = useState<VehicleRow[]>([])
   const [revisionsData, setRevisionsData] = useState<VehicleRevisionRow[]>([])
-  const [invoiceProfile, setInvoiceProfile] = useState<InvoiceProfile>({
-    companyName: 'JLT - JUST LEASE TECH',
-    companyAddress: 'Thailand',
-    logoDataUrl: '',
-  })
-  const [invoiceProfileDraft, setInvoiceProfileDraft] = useState<InvoiceProfile>({
-    companyName: 'JLT - JUST LEASE TECH',
-    companyAddress: 'Thailand',
-    logoDataUrl: '',
-  })
+  const [invoiceProfile, setInvoiceProfile] = useState<InvoiceProfile>(readInvoiceProfileFromStorage)
+  const [invoiceProfileDraft, setInvoiceProfileDraft] =
+    useState<InvoiceProfile>(readInvoiceProfileFromStorage)
   const [invoiceProfileOpen, setInvoiceProfileOpen] = useState(false)
   const [clientsData, setClientsData] = useState<ClientRow[]>([])
   const [contractsData, setContractsData] = useState<ContractRow[]>([])
-  const [pricingPlansData, setPricingPlansData] = useState<PricingPlanRow[]>([])
   const [currentSubscription, setCurrentSubscription] = useState<BillingSubscriptionRow | null>(null)
   const [pendingCheckoutCode, setPendingCheckoutCode] = useState('')
   const [testModeEnabled, setTestModeEnabled] = useState(true)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [editModal, setEditModal] = useState<EditModalState | null>(null)
   const [modalVehiclePhoto, setModalVehiclePhoto] = useState<File | null>(null)
+  const [modalClientPassportPhoto, setModalClientPassportPhoto] = useState<File | null>(null)
+  const [clientPassportPreviewUrl, setClientPassportPreviewUrl] = useState<string | null>(null)
+  const [passportLocalPreviewUrl, setPassportLocalPreviewUrl] = useState<string | null>(null)
+  const modalClientPassportInputRef = useRef<HTMLInputElement>(null)
   const [modalInspectionPhotos, setModalInspectionPhotos] = useState<File[]>([])
   const [savingModal, setSavingModal] = useState(false)
   const [modalError, setModalError] = useState('')
   const [loadError, setLoadError] = useState('')
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const notificationsRef = useRef<HTMLDivElement>(null)
+  const modalFileInputRef = useRef<HTMLInputElement>(null)
   const currentIndex = Math.max(0, menuMeta.findIndex((item) => item.key === section))
   const refreshAppData = async () => {
     setLoadError('')
@@ -2024,11 +2275,12 @@ export function DashboardShell() {
     if (!ownerId) return
     setCurrentUserId(ownerId)
 
-    const [vehiclesRes, clientsRes, contractsRes, pricingPlansRes, revisionsRes, subscriptionRes] = await Promise.all([
+    const [vehiclesRes, clientsRes, contractsRes, revisionsRes, subscriptionRes] = await Promise.all([
       supabase.from('vehicles').select('id,type,brand,model,status,daily_price'),
-      supabase.from('clients').select('id,full_name,phone,email'),
+      supabase
+        .from('clients')
+        .select('id,full_name,phone,email,passport_number,nationality,passport_photo_path'),
       supabase.from('contracts').select('id,client_id,vehicle_id,start_at,end_at,total_price,status,created_at'),
-      supabase.from('pricing_plans').select('id,label,vehicle_type,day_rate,week_rate,month_rate,active'),
       supabase
         .from('vehicle_revisions')
         .select('id,vehicle_id,due_date,status,note,created_at')
@@ -2045,9 +2297,6 @@ export function DashboardShell() {
     if (!vehiclesRes.error && vehiclesRes.data) setVehiclesData(vehiclesRes.data as VehicleRow[])
     if (!clientsRes.error && clientsRes.data) setClientsData(clientsRes.data as ClientRow[])
     if (!contractsRes.error && contractsRes.data) setContractsData(contractsRes.data as ContractRow[])
-    if (!pricingPlansRes.error && pricingPlansRes.data) {
-      setPricingPlansData(pricingPlansRes.data as PricingPlanRow[])
-    }
     if (!revisionsRes.error && revisionsRes.data) {
       setRevisionsData(revisionsRes.data as VehicleRevisionRow[])
     }
@@ -2065,7 +2314,6 @@ export function DashboardShell() {
       vehiclesRes.error?.message ||
       clientsRes.error?.message ||
       contractsRes.error?.message ||
-      pricingPlansRes.error?.message ||
       (revisionsRes.error &&
       !revisionsRes.error.message.toLowerCase().includes('does not exist')
         ? revisionsRes.error.message
@@ -2104,22 +2352,39 @@ export function DashboardShell() {
       subscription.unsubscribe()
     }
   }, [])
+
   useEffect(() => {
-    const stored = localStorage.getItem('jlt-invoice-profile')
-    if (!stored) return
-    try {
-      const parsed = JSON.parse(stored) as InvoiceProfile
-      const normalized = {
-        companyName: parsed.companyName || 'JLT - JUST LEASE TECH',
-        companyAddress: parsed.companyAddress || 'Thailand',
-        logoDataUrl: parsed.logoDataUrl || '',
-      }
-      setInvoiceProfile(normalized)
-      setInvoiceProfileDraft(normalized)
-    } catch {
-      // Ignore malformed local storage content.
+    if (!modalClientPassportPhoto) {
+      setPassportLocalPreviewUrl(null)
+      return
     }
-  }, [])
+    const u = URL.createObjectURL(modalClientPassportPhoto)
+    setPassportLocalPreviewUrl(u)
+    return () => URL.revokeObjectURL(u)
+  }, [modalClientPassportPhoto])
+
+  useEffect(() => {
+    if (editModal?.kind !== 'client' || editModal.mode !== 'edit') {
+      setClientPassportPreviewUrl(null)
+      return
+    }
+    const path = String(editModal.values.passport_photo_path || '').trim()
+    if (!path) {
+      setClientPassportPreviewUrl(null)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      const { data, error } = await supabase.storage
+        .from(clientPassportPhotosBucket)
+        .createSignedUrl(path, 3600)
+      if (!cancelled && !error && data?.signedUrl) setClientPassportPreviewUrl(data.signedUrl)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [editModal?.kind, editModal?.mode, editModal?.id, editModal?.values?.passport_photo_path])
+
   useEffect(() => {
     if (isPublicDemoMode) {
       setTestModeEnabled(true)
@@ -2165,6 +2430,9 @@ export function DashboardShell() {
   const closeModal = () => {
     setEditModal(null)
     setModalVehiclePhoto(null)
+    setModalClientPassportPhoto(null)
+    setClientPassportPreviewUrl(null)
+    setPassportLocalPreviewUrl(null)
     setModalInspectionPhotos([])
     setModalError('')
   }
@@ -2263,6 +2531,7 @@ export function DashboardShell() {
   const onEditClient = async (clientId: string) => {
     const row = clientsData.find((item) => item.id === clientId)
     if (!row) return
+    setModalClientPassportPhoto(null)
     setEditModal({
       mode: 'edit',
       kind: 'client',
@@ -2271,6 +2540,9 @@ export function DashboardShell() {
         full_name: row.full_name,
         phone: row.phone || '',
         email: row.email || '',
+        passport_number: row.passport_number || '',
+        nationality: row.nationality || '',
+        passport_photo_path: row.passport_photo_path || '',
       },
     })
   }
@@ -2286,6 +2558,16 @@ export function DashboardShell() {
     if (!row) return
     const normalizedStart = row.start_at ? String(row.start_at).slice(0, 10) : ''
     const normalizedEnd = row.end_at ? String(row.end_at).slice(0, 10) : ''
+    const days = contractBillableDaysCount(normalizedStart, normalizedEnd) ?? 1
+    const total = Number(row.total_price ?? 0)
+    const vehicle = vehiclesData.find((item) => item.id === row.vehicle_id)
+    const dailyFromVehicle = Number(vehicle?.daily_price ?? 0)
+    const dailyDerived =
+      dailyFromVehicle > 0
+        ? dailyFromVehicle
+        : days > 0
+          ? Math.round((total / days) * 100) / 100
+          : total
     setEditModal({
       mode: 'edit',
       kind: 'contract',
@@ -2293,7 +2575,7 @@ export function DashboardShell() {
       values: {
         client_id: row.client_id || '',
         vehicle_id: row.vehicle_id || '',
-        total_price: String(row.total_price ?? 0),
+        daily_price: String(dailyDerived),
         start_at: normalizedStart,
         end_at: normalizedEnd,
         status: row.status,
@@ -2301,28 +2583,6 @@ export function DashboardShell() {
     })
   }
 
-  const onDeletePricingPlan = async (planId: string) => {
-    if (!window.confirm(app.confirmDeletePricing)) return
-    const { error } = await supabase.from('pricing_plans').delete().eq('id', planId)
-    if (!error) await refreshAppData()
-  }
-
-  const onEditPricingPlan = async (planId: string) => {
-    const row = pricingPlansData.find((item) => item.id === planId)
-    if (!row) return
-    setEditModal({
-      mode: 'edit',
-      kind: 'pricing',
-      id: planId,
-      values: {
-        label: row.label,
-        day_rate: String(row.day_rate),
-        week_rate: String(row.week_rate),
-        month_rate: String(row.month_rate),
-        vehicle_type: row.vehicle_type,
-      },
-    })
-  }
   const onSubmitEditModal = async () => {
     if (!editModal) return
     setModalError('')
@@ -2360,7 +2620,11 @@ export function DashboardShell() {
         setModalError(app.contractDateError)
         return
       }
-      if (!isPositive(editModal.values.total_price)) {
+      if (contractBillableDaysCount(editModal.values.start_at, editModal.values.end_at) === null) {
+        setModalError(app.contractDateError)
+        return
+      }
+      if (!isPositive(editModal.values.daily_price)) {
         setModalError(app.validationPricePositive)
         return
       }
@@ -2412,13 +2676,43 @@ export function DashboardShell() {
           full_name: editModal.values.full_name,
           phone: editModal.values.phone || null,
           email: editModal.values.email || null,
+          passport_number: (editModal.values.passport_number || '').trim() || null,
+          nationality: (editModal.values.nationality || '').trim() || null,
         })
         .eq('id', editModal.id)
       if (error) requestError = error.message
+      else if (!requestError && modalClientPassportPhoto && ownerId) {
+        const compressed = await compressImageFile(modalClientPassportPhoto)
+        const ext = compressed.name.split('.').pop() || 'jpg'
+        const fileName = `passport-${Date.now()}.${ext}`
+        const filePath = buildClientPassportPhotoPath({
+          isPublicDemo: isPublicDemoMode,
+          userId: ownerId,
+          clientId: editModal.id,
+          fileName,
+        })
+        const { error: upErr } = await supabase.storage
+          .from(clientPassportPhotosBucket)
+          .upload(filePath, compressed, {
+            cacheControl: '3600',
+            upsert: true,
+            contentType: compressed.type || 'image/jpeg',
+          })
+        if (upErr) requestError = upErr.message
+        else {
+          const { error: upDb } = await supabase
+            .from('clients')
+            .update({ passport_photo_path: filePath })
+            .eq('id', editModal.id)
+          if (upDb) requestError = upDb.message
+        }
+      }
     }
     if (editModal.kind === 'contract' && editModal.mode === 'edit') {
       const selectedClient = clientsData.find((client) => client.id === editModal.values.client_id)
       const selectedVehicle = vehiclesData.find((vehicle) => vehicle.id === editModal.values.vehicle_id)
+      const contractDays = contractBillableDaysCount(editModal.values.start_at, editModal.values.end_at) ?? 1
+      const contractTotalPrice = Math.round(Number(editModal.values.daily_price || 0) * contractDays)
       const fullPayload = {
         client_id: editModal.values.client_id,
         vehicle_id: editModal.values.vehicle_id,
@@ -2426,7 +2720,7 @@ export function DashboardShell() {
         vehicle_label: selectedVehicle
           ? `${selectedVehicle.brand} ${selectedVehicle.model}`.trim()
           : '',
-        total_price: Number(editModal.values.total_price || 0),
+        total_price: contractTotalPrice,
         start_at: editModal.values.start_at,
         end_at: editModal.values.end_at,
         status: editModal.values.status as ContractRow['status'],
@@ -2442,7 +2736,7 @@ export function DashboardShell() {
         const fallbackPayload = {
           client_id: editModal.values.client_id,
           vehicle_id: editModal.values.vehicle_id,
-          total_price: Number(editModal.values.total_price || 0),
+          total_price: contractTotalPrice,
           start_at: editModal.values.start_at,
           end_at: editModal.values.end_at,
           status: editModal.values.status as ContractRow['status'],
@@ -2453,19 +2747,6 @@ export function DashboardShell() {
           .eq('id', editModal.id)
         error = fallbackRes.error
       }
-      if (error) requestError = error.message
-    }
-    if (editModal.kind === 'pricing' && editModal.mode === 'edit') {
-      const { error } = await supabase
-        .from('pricing_plans')
-        .update({
-          label: editModal.values.label,
-          day_rate: Number(editModal.values.day_rate || 0),
-          week_rate: Number(editModal.values.week_rate || 0),
-          month_rate: Number(editModal.values.month_rate || 0),
-          vehicle_type: editModal.values.vehicle_type as PricingPlanRow['vehicle_type'],
-        })
-        .eq('id', editModal.id)
       if (error) requestError = error.message
     }
     if (editModal.kind === 'vehicle' && editModal.mode === 'create' && ownerId) {
@@ -2518,17 +2799,51 @@ export function DashboardShell() {
       }
     }
     if (editModal.kind === 'client' && editModal.mode === 'create' && ownerId) {
-      const { error } = await supabase.from('clients').insert({
-        owner_id: ownerId,
-        full_name: editModal.values.full_name,
-        phone: editModal.values.phone || null,
-        email: editModal.values.email || null,
-      })
+      const { data: createdClient, error } = await supabase
+        .from('clients')
+        .insert({
+          owner_id: ownerId,
+          full_name: editModal.values.full_name,
+          phone: editModal.values.phone || null,
+          email: editModal.values.email || null,
+          passport_number: (editModal.values.passport_number || '').trim() || null,
+          nationality: (editModal.values.nationality || '').trim() || null,
+        })
+        .select('id')
+        .single()
       if (error) requestError = error.message
+      else if (createdClient?.id && modalClientPassportPhoto && !requestError) {
+        const compressed = await compressImageFile(modalClientPassportPhoto)
+        const ext = compressed.name.split('.').pop() || 'jpg'
+        const fileName = `passport-${Date.now()}.${ext}`
+        const filePath = buildClientPassportPhotoPath({
+          isPublicDemo: isPublicDemoMode,
+          userId: ownerId,
+          clientId: createdClient.id,
+          fileName,
+        })
+        const { error: upErr } = await supabase.storage
+          .from(clientPassportPhotosBucket)
+          .upload(filePath, compressed, {
+            cacheControl: '3600',
+            upsert: true,
+            contentType: compressed.type || 'image/jpeg',
+          })
+        if (upErr) requestError = upErr.message
+        else {
+          const { error: upDb } = await supabase
+            .from('clients')
+            .update({ passport_photo_path: filePath })
+            .eq('id', createdClient.id)
+          if (upDb) requestError = upDb.message
+        }
+      }
     }
     if (editModal.kind === 'contract' && editModal.mode === 'create' && ownerId) {
       const selectedClient = clientsData.find((client) => client.id === editModal.values.client_id)
       const selectedVehicle = vehiclesData.find((vehicle) => vehicle.id === editModal.values.vehicle_id)
+      const contractDays = contractBillableDaysCount(editModal.values.start_at, editModal.values.end_at) ?? 1
+      const contractTotalPrice = Math.round(Number(editModal.values.daily_price || 0) * contractDays)
       const fullPayload = {
         owner_id: ownerId,
         client_id: editModal.values.client_id,
@@ -2539,7 +2854,7 @@ export function DashboardShell() {
           : '',
         start_at: editModal.values.start_at,
         end_at: editModal.values.end_at,
-        total_price: Number(editModal.values.total_price || 0),
+        total_price: contractTotalPrice,
         status: (editModal.values.status || 'draft') as ContractRow['status'],
       }
       let { data: createdContract, error } = await supabase
@@ -2560,7 +2875,7 @@ export function DashboardShell() {
           vehicle_id: editModal.values.vehicle_id,
           start_at: editModal.values.start_at,
           end_at: editModal.values.end_at,
-          total_price: Number(editModal.values.total_price || 0),
+          total_price: contractTotalPrice,
           status: (editModal.values.status || 'draft') as ContractRow['status'],
         }
         const fallbackRes = await supabase.from('contracts').insert(fallbackPayload).select('id').single()
@@ -2673,11 +2988,19 @@ export function DashboardShell() {
       return
     }
     if (section === 'clients') {
+      setModalClientPassportPhoto(null)
       setEditModal({
         mode: 'create',
         kind: 'client',
         id: '',
-        values: { full_name: '', phone: '', email: '' },
+        values: {
+          full_name: '',
+          phone: '',
+          email: '',
+          passport_number: '',
+          nationality: '',
+          passport_photo_path: '',
+        },
       })
       return
     }
@@ -2689,7 +3012,7 @@ export function DashboardShell() {
         values: {
           client_id: '',
           vehicle_id: '',
-          total_price: '',
+          daily_price: '',
           start_at: '',
           end_at: '',
           status: 'draft',
@@ -2698,7 +3021,7 @@ export function DashboardShell() {
       })
       return
     }
-    if (section === 'pricing' || section === 'abonnement') {
+    if (section === 'abonnement') {
       setEditModal({
         mode: 'create',
         kind: 'pricing',
@@ -2713,16 +3036,13 @@ export function DashboardShell() {
       : null
   const contractStartDate = editModal?.kind === 'contract' ? editModal.values.start_at : ''
   const contractEndDate = editModal?.kind === 'contract' ? editModal.values.end_at : ''
-  const computedContractTotal =
-    selectedModalVehicle && contractStartDate && contractEndDate
-      ? (() => {
-          const start = new Date(contractStartDate)
-          const end = new Date(contractEndDate)
-          if (Number.isNaN(+start) || Number.isNaN(+end) || end <= start) return null
-          const dayMs = 1000 * 60 * 60 * 24
-          const days = Math.max(1, Math.ceil((+end - +start) / dayMs))
-          return Math.round(days * Number(selectedModalVehicle.daily_price || 0))
-        })()
+  const contractDaysForModal =
+    editModal?.kind === 'contract' ? contractBillableDaysCount(contractStartDate, contractEndDate) : null
+  const contractTotalPreview =
+    editModal?.kind === 'contract' &&
+    contractDaysForModal !== null &&
+    Number(editModal.values.daily_price || 0) > 0
+      ? Math.round(contractDaysForModal * Number(editModal.values.daily_price || 0))
       : null
   const sectionSubtitleMap: Record<string, string> = {
     dashboard: app.subtitles[0] || '',
@@ -2730,8 +3050,7 @@ export function DashboardShell() {
     clients: `${clientsData.length} ${d.registered}`,
     contrats: `${contractsData.length} ${app.subtitles[3]?.replace(/^.*?(\d+\s+)/, '') || ''}`.trim(),
     planning: app.subtitles[4] || '',
-    pricing: `${pricingPlansData.length} ${app.subtitles[5]?.replace(/^.*?(\d+\s+)/, '') || ''}`.trim(),
-    abonnement: `${pricingPlansData.length} ${app.subtitles[6]?.replace(/^.*?(\d+\s+)/, '') || ''}`.trim(),
+    abonnement: app.subtitles[5] || '',
   }
   const sectionSubtitle = sectionSubtitleMap[section] || app.subtitles[currentIndex] || app.subtitles[0]
   const isSubscriptionActive =
@@ -2751,6 +3070,10 @@ export function DashboardShell() {
     return diffDays >= 0 && diffDays <= 7
   }).length
   const notificationCount = returnsTodayCount + revisionsSoonCount
+  const primaryActionLabel =
+    section === 'dashboard'
+      ? app.actions[3]
+      : app.actions[currentIndex] || app.actions[0]
   const vehicleByIdNotif = new Map(vehiclesData.map((v) => [v.id, v]))
   const returnsTodayNotifications = contractsData.filter(
     (contract) =>
@@ -2826,36 +3149,43 @@ export function DashboardShell() {
           </div>
         )}
         <header className="dashboard-top">
-          <div>
-            <h1>{app.menu[currentIndex] || app.menu[0]}</h1>
-            <p>{sectionSubtitle}</p>
-            <div className="invoice-profile-preview">
-              {invoiceProfile.logoDataUrl ? (
-                <img src={invoiceProfile.logoDataUrl} alt="invoice-logo" />
-              ) : (
-                <div className="invoice-profile-logo-placeholder">LOGO</div>
-              )}
-              <div>
-                <strong>{invoiceProfile.companyName}</strong>
-                <p>{invoiceProfile.companyAddress}</p>
-              </div>
+          <div className="dashboard-top__left">
+            <div className="dashboard-top__titles">
+              <h1>{app.menu[currentIndex] || app.menu[0]}</h1>
+              <p>{sectionSubtitle}</p>
             </div>
-            <div className="dashboard-mobile-extras">
-              <select
-                className="sidebar-lang"
-                aria-label={t('nav').language}
-                value={locale}
-                onChange={(event) => setLocale(event.target.value as any)}
-              >
-                {localeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <Link to="/" className="dashboard-mobile-back">
-                {app.backSite}
-              </Link>
+            <div className="dashboard-top__meta">
+              <div className="dashboard-top__meta-left">
+                <select
+                  className="sidebar-lang"
+                  aria-label={t('nav').language}
+                  value={locale}
+                  onChange={(event) => setLocale(event.target.value as any)}
+                >
+                  {localeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <Link to="/" className="dashboard-mobile-back">
+                  {app.backSite}
+                </Link>
+              </div>
+              <div className="dashboard-top__company invoice-profile-preview">
+                {invoiceProfile.logoDataUrl ? (
+                  <img src={invoiceProfile.logoDataUrl} alt="invoice-logo" />
+                ) : (
+                  <div className="invoice-profile-logo-placeholder">LOGO</div>
+                )}
+                <div>
+                  <strong>{invoiceProfile.companyName}</strong>
+                  <p>{invoiceProfile.companyAddress}</p>
+                  {invoiceProfile.companyPhone?.trim() ? (
+                    <p className="invoice-profile-phone">{invoiceProfile.companyPhone.trim()}</p>
+                  ) : null}
+                </div>
+              </div>
             </div>
           </div>
           <div className="top-actions">
@@ -2922,51 +3252,62 @@ export function DashboardShell() {
                 </div>
               )}
             </div>
-            <button type="button" className="ghost-btn" onClick={() => setInvoiceProfileOpen(true)}>
+            <button
+              type="button"
+              className="ghost-btn top-actions__settings"
+              onClick={() => {
+                setInvoiceProfileDraft(invoiceProfile)
+                setInvoiceProfileOpen(true)
+              }}
+            >
               {app.invoiceProfile}
             </button>
-            <button type="button" className="accent-btn" onClick={onOpenCreateModal}>
+            <button type="button" className="accent-btn top-actions__primary" onClick={onOpenCreateModal}>
               <Plus size={14} />
-              {app.actions[currentIndex] || app.actions[0]}
+              {primaryActionLabel}
             </button>
           </div>
         </header>
 
-        <div className="toolbar">
-          <div className="search-box">
-            <Search size={14} />
-            <input
-              placeholder={app.search}
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-            />
+        {section !== 'abonnement' && (
+          <div className="toolbar">
+            <div className="search-box">
+              <Search size={14} />
+              <input
+                placeholder={app.search}
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+              />
+            </div>
+            {section !== 'planning' && (
+              <div className="toolbar-actions">
+                <select
+                  value={selectedType}
+                  onChange={(event) => setSelectedType(event.target.value as VehicleTypeFilter)}
+                  aria-label={app.filterType}
+                >
+                  <option value="all">{app.filterType}</option>
+                  <option value="scooter">{d.vehicleTypes[0]}</option>
+                  <option value="car">{d.vehicleTypes[1]}</option>
+                  <option value="bike">{d.vehicleTypes[2]}</option>
+                </select>
+                <select
+                  value={selectedStatus}
+                  onChange={(event) => setSelectedStatus(event.target.value as StatusFilter)}
+                  aria-label={app.filterStatus}
+                >
+                  <option value="all">{app.filterStatus}</option>
+                  <option value="available">{app.available}</option>
+                  <option value="reserved">{app.reserved}</option>
+                  <option value="maintenance">{d.maintenance}</option>
+                  <option value="active">{app.active}</option>
+                  <option value="done">{app.done}</option>
+                  <option value="draft">{app.draft}</option>
+                </select>
+              </div>
+            )}
           </div>
-          <div className="toolbar-actions">
-            <select
-              value={selectedType}
-              onChange={(event) => setSelectedType(event.target.value as VehicleTypeFilter)}
-              aria-label={app.filterType}
-            >
-              <option value="all">{app.filterType}</option>
-              <option value="scooter">{d.vehicleTypes[0]}</option>
-              <option value="car">{d.vehicleTypes[1]}</option>
-              <option value="bike">{d.vehicleTypes[2]}</option>
-            </select>
-            <select
-              value={selectedStatus}
-              onChange={(event) => setSelectedStatus(event.target.value as StatusFilter)}
-              aria-label={app.filterStatus}
-            >
-              <option value="all">{app.filterStatus}</option>
-              <option value="available">{app.available}</option>
-              <option value="reserved">{app.reserved}</option>
-              <option value="maintenance">{d.maintenance}</option>
-              <option value="active">{app.active}</option>
-              <option value="done">{app.done}</option>
-              <option value="draft">{app.draft}</option>
-            </select>
-          </div>
-        </div>
+        )}
 
         <div className="dashboard-content">
           {loadError && <p className="modal-error">{loadError}</p>}
@@ -2975,7 +3316,7 @@ export function DashboardShell() {
               <h4>{app.billingLockedTitle}</h4>
               <p>{app.billingLockedDesc}</p>
               <Link to="/app/abonnement" className="see-all-link">
-                {app.menu[6]}
+                {app.menu[5]}
               </Link>
             </article>
           ) : (
@@ -2990,7 +3331,6 @@ export function DashboardShell() {
               invoiceProfile,
               clientsData,
               contractsData,
-              pricingPlansData,
               currentSubscription,
               pendingCheckoutCode,
               onStartCheckout,
@@ -3004,8 +3344,6 @@ export function DashboardShell() {
               onDeleteClient,
               onEditContract,
               onDeleteContract,
-              onEditPricingPlan,
-              onDeletePricingPlan,
             )
           )}
         </div>
@@ -3035,15 +3373,29 @@ export function DashboardShell() {
                   <input value={editModal.values.brand || ''} onChange={(e) => setEditModal((p) => (p ? { ...p, values: { ...p.values, brand: e.target.value } } : p))} placeholder={app.fieldBrand} />
                   <input value={editModal.values.model || ''} onChange={(e) => setEditModal((p) => (p ? { ...p, values: { ...p.values, model: e.target.value } } : p))} placeholder={app.fieldModel} />
                   <input value={editModal.values.daily_price || ''} onChange={(e) => setEditModal((p) => (p ? { ...p, values: { ...p.values, daily_price: e.target.value } } : p))} placeholder={app.fieldDailyPrice} />
-                  <label className="modal-file-input">
+                  <div className="modal-file-input">
                     <span>{app.vehiclePhotoCta}</span>
+                    <div className="modal-file-input__row">
+                      <button
+                        type="button"
+                        className="modal-file-input__pick"
+                        onClick={() => modalFileInputRef.current?.click()}
+                      >
+                        {app.fileInputChooseSingle}
+                      </button>
+                      <span className="modal-file-input__status">
+                        {modalVehiclePhoto ? modalVehiclePhoto.name : app.fileInputNoneSelected}
+                      </span>
+                    </div>
                     <input
+                      ref={modalFileInputRef}
                       type="file"
+                      className="modal-file-input__hidden"
                       accept="image/*"
                       capture="environment"
                       onChange={(event) => setModalVehiclePhoto(event.target.files?.[0] ?? null)}
                     />
-                  </label>
+                  </div>
                   <select value={editModal.values.status || 'available'} onChange={(e) => setEditModal((p) => (p ? { ...p, values: { ...p.values, status: e.target.value } } : p))}>
                     <option value="available">{app.available}</option>
                     <option value="reserved">{app.reserved}</option>
@@ -3058,9 +3410,79 @@ export function DashboardShell() {
               )}
               {editModal.kind === 'client' && (
                 <>
-                  <input value={editModal.values.full_name || ''} onChange={(e) => setEditModal((p) => (p ? { ...p, values: { ...p.values, full_name: e.target.value } } : p))} placeholder={app.fieldFullName} />
-                  <input value={editModal.values.phone || ''} onChange={(e) => setEditModal((p) => (p ? { ...p, values: { ...p.values, phone: e.target.value } } : p))} placeholder={app.fieldPhone} />
-                  <input value={editModal.values.email || ''} onChange={(e) => setEditModal((p) => (p ? { ...p, values: { ...p.values, email: e.target.value } } : p))} placeholder={app.fieldEmail} />
+                  <input
+                    value={editModal.values.full_name || ''}
+                    onChange={(e) =>
+                      setEditModal((p) => (p ? { ...p, values: { ...p.values, full_name: e.target.value } } : p))
+                    }
+                    placeholder={app.fieldFullName}
+                  />
+                  <input
+                    value={editModal.values.passport_number || ''}
+                    onChange={(e) =>
+                      setEditModal((p) =>
+                        p ? { ...p, values: { ...p.values, passport_number: e.target.value } } : p,
+                      )
+                    }
+                    placeholder={app.fieldPassportNumber}
+                    autoComplete="off"
+                  />
+                  <input
+                    value={editModal.values.nationality || ''}
+                    onChange={(e) =>
+                      setEditModal((p) =>
+                        p ? { ...p, values: { ...p.values, nationality: e.target.value } } : p,
+                      )
+                    }
+                    placeholder={app.fieldNationality}
+                    autoComplete="off"
+                  />
+                  <input
+                    value={editModal.values.phone || ''}
+                    onChange={(e) =>
+                      setEditModal((p) => (p ? { ...p, values: { ...p.values, phone: e.target.value } } : p))
+                    }
+                    placeholder={app.fieldPhone}
+                  />
+                  <input
+                    value={editModal.values.email || ''}
+                    onChange={(e) =>
+                      setEditModal((p) => (p ? { ...p, values: { ...p.values, email: e.target.value } } : p))
+                    }
+                    placeholder={app.fieldEmail}
+                  />
+                  <div className="modal-file-input">
+                    <span>{app.clientPassportPhotoCta}</span>
+                    <div className="modal-file-input__row">
+                      <button
+                        type="button"
+                        className="modal-file-input__pick"
+                        onClick={() => modalClientPassportInputRef.current?.click()}
+                      >
+                        {app.fileInputChooseSingle}
+                      </button>
+                      <span className="modal-file-input__status">
+                        {modalClientPassportPhoto ? modalClientPassportPhoto.name : app.fileInputNoneSelected}
+                      </span>
+                    </div>
+                    <input
+                      ref={modalClientPassportInputRef}
+                      type="file"
+                      className="modal-file-input__hidden"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(event) => setModalClientPassportPhoto(event.target.files?.[0] ?? null)}
+                    />
+                  </div>
+                  {(passportLocalPreviewUrl || clientPassportPreviewUrl) && (
+                    <div className="modal-passport-preview">
+                      <img
+                        src={passportLocalPreviewUrl || clientPassportPreviewUrl || ''}
+                        alt=""
+                        className="modal-passport-preview__img"
+                      />
+                    </div>
+                  )}
                 </>
               )}
               {editModal.kind === 'contract' && (
@@ -3090,10 +3512,10 @@ export function DashboardShell() {
                           values: {
                             ...p.values,
                             vehicle_id: nextVehicleId,
-                            total_price:
+                            daily_price:
                               p.mode === 'create' && nextVehicle
                                 ? String(nextVehicle.daily_price || 0)
-                                : p.values.total_price,
+                                : p.values.daily_price,
                           },
                         }
                       })
@@ -3106,36 +3528,57 @@ export function DashboardShell() {
                       </option>
                     ))}
                   </select>
-                  <input
-                    type="date"
+                  <LocalizedDatePicker
+                    locale={locale}
                     value={editModal.values.start_at || ''}
-                    onChange={(e) =>
-                      setEditModal((p) => (p ? { ...p, values: { ...p.values, start_at: e.target.value } } : p))
+                    onChange={(ymd) =>
+                      setEditModal((p) =>
+                        p
+                          ? {
+                              ...p,
+                              values: {
+                                ...p.values,
+                                start_at: ymd,
+                                end_at:
+                                  p.values.end_at && p.values.end_at < ymd ? ymd : p.values.end_at,
+                              },
+                            }
+                          : p,
+                      )
                     }
                     placeholder={app.fieldStartAt}
                   />
-                  <input
-                    type="date"
+                  <LocalizedDatePicker
+                    locale={locale}
                     value={editModal.values.end_at || ''}
                     min={editModal.values.start_at || undefined}
-                    onChange={(e) =>
-                      setEditModal((p) => (p ? { ...p, values: { ...p.values, end_at: e.target.value } } : p))
+                    onChange={(ymd) =>
+                      setEditModal((p) => (p ? { ...p, values: { ...p.values, end_at: ymd } } : p))
                     }
                     placeholder={app.fieldEndAt}
                   />
                   <input
-                    value={editModal.values.total_price || ''}
+                    type="number"
+                    min={0}
+                    step="any"
+                    inputMode="decimal"
+                    value={editModal.values.daily_price || ''}
                     onChange={(e) =>
-                      setEditModal((p) => (p ? { ...p, values: { ...p.values, total_price: e.target.value } } : p))
+                      setEditModal((p) => (p ? { ...p, values: { ...p.values, daily_price: e.target.value } } : p))
                     }
-                    placeholder={app.fieldTotalPrice}
+                    placeholder={app.fieldDailyPrice}
                   />
                   {selectedModalVehicle && (
                     <p className="modal-hint">
-                      {`${app.dailyRateHint}: ฿${selectedModalVehicle.daily_price}`}
-                      {computedContractTotal !== null
-                        ? ` • ${app.suggestedTotalHint}: ฿${computedContractTotal}`
-                        : ''}
+                      {`${app.dailyRateHint} (${app.fieldVehicleId}): ฿${selectedModalVehicle.daily_price}`}
+                    </p>
+                  )}
+                  {contractTotalPreview !== null && contractDaysForModal !== null && (
+                    <p className="modal-hint">
+                      {app.contractPricingSummary
+                        .replace('{total}', String(contractTotalPreview))
+                        .replace('{days}', String(contractDaysForModal))
+                        .replace('{daily}', editModal.values.daily_price || '0')}
                     </p>
                   )}
                   <select value={editModal.values.status || 'draft'} onChange={(e) => setEditModal((p) => (p ? { ...p, values: { ...p.values, status: e.target.value } } : p))}>
@@ -3158,10 +3601,29 @@ export function DashboardShell() {
                         }
                         placeholder={app.contractInspectionPlaceholder}
                       />
-                      <label className="modal-file-input">
+                      <div className="modal-file-input">
                         <span>{app.contractInspectionPhotosCta}</span>
+                        <div className="modal-file-input__row">
+                          <button
+                            type="button"
+                            className="modal-file-input__pick"
+                            onClick={() => modalFileInputRef.current?.click()}
+                          >
+                            {app.fileInputChooseMultiple}
+                          </button>
+                          <span className="modal-file-input__status">
+                            {modalInspectionPhotos.length === 0
+                              ? app.fileInputNoneSelected
+                              : app.contractInspectionPhotosCount.replace(
+                                  '{n}',
+                                  String(modalInspectionPhotos.length),
+                                )}
+                          </span>
+                        </div>
                         <input
+                          ref={modalFileInputRef}
                           type="file"
+                          className="modal-file-input__hidden"
                           accept="image/*"
                           capture="environment"
                           multiple
@@ -3171,7 +3633,7 @@ export function DashboardShell() {
                             event.target.value = ''
                           }}
                         />
-                      </label>
+                      </div>
                       {modalInspectionPhotos.length > 0 && (
                         <div className="modal-contract-inspection-row">
                           <span className="modal-hint">
@@ -3217,26 +3679,57 @@ export function DashboardShell() {
         )}
         {invoiceProfileOpen && (
           <div className="modal-backdrop" role="dialog" aria-modal="true">
-            <div className="modal-card">
+            <div className="modal-card modal-card--invoice">
               <h3>{app.invoiceProfile}</h3>
-              <input
-                value={invoiceProfileDraft.companyName}
-                onChange={(event) =>
-                  setInvoiceProfileDraft((prev) => ({ ...prev, companyName: event.target.value }))
-                }
-                placeholder={app.invoiceCompanyName}
-              />
-              <input
-                value={invoiceProfileDraft.companyAddress}
-                onChange={(event) =>
-                  setInvoiceProfileDraft((prev) => ({ ...prev, companyAddress: event.target.value }))
-                }
-                placeholder={app.invoiceCompanyAddress}
-              />
-              <label className="photo-upload-btn">
-                {app.invoiceClientLogo}
-                <input type="file" accept="image/*" onChange={onGlobalInvoiceLogoChange} />
-              </label>
+              <p className="modal-hint">{app.invoiceProfileHint}</p>
+              <div className="modal-field">
+                <label htmlFor="jlt-invoice-name">{app.invoiceCompanyName}</label>
+                <input
+                  id="jlt-invoice-name"
+                  value={invoiceProfileDraft.companyName}
+                  onChange={(event) =>
+                    setInvoiceProfileDraft((prev) => ({ ...prev, companyName: event.target.value }))
+                  }
+                  autoComplete="organization"
+                />
+              </div>
+              <div className="modal-field">
+                <label htmlFor="jlt-invoice-address">{app.invoiceCompanyAddress}</label>
+                <textarea
+                  id="jlt-invoice-address"
+                  rows={3}
+                  value={invoiceProfileDraft.companyAddress}
+                  onChange={(event) =>
+                    setInvoiceProfileDraft((prev) => ({ ...prev, companyAddress: event.target.value }))
+                  }
+                  autoComplete="street-address"
+                />
+              </div>
+              <div className="modal-field">
+                <label htmlFor="jlt-invoice-phone">{app.invoiceCompanyPhone}</label>
+                <input
+                  id="jlt-invoice-phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  value={invoiceProfileDraft.companyPhone}
+                  onChange={(event) =>
+                    setInvoiceProfileDraft((prev) => ({ ...prev, companyPhone: event.target.value }))
+                  }
+                />
+              </div>
+              <div className="modal-field">
+                <span className="modal-field__static-label">{app.invoiceClientLogo}</span>
+                {invoiceProfileDraft.logoDataUrl ? (
+                  <div className="invoice-modal-logo-preview">
+                    <img src={invoiceProfileDraft.logoDataUrl} alt="" />
+                  </div>
+                ) : null}
+                <label className="photo-upload-btn">
+                  {app.invoiceChangeLogo}
+                  <input type="file" accept="image/*" onChange={onGlobalInvoiceLogoChange} />
+                </label>
+              </div>
               <div className="modal-actions">
                 <button type="button" onClick={() => setInvoiceProfileOpen(false)}>
                   {app.cancel}
