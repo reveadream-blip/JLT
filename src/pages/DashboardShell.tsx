@@ -63,6 +63,73 @@ function matchesSearchQuery(haystack: string, query: string): boolean {
   return tokens.every((t) => folded.includes(t))
 }
 
+/** Texte brut récapitulatif (corps d’email / Web Share), aligné sur les champs du PDF. */
+function buildInvoicePlainText(
+  app: {
+    invoiceTitle: string
+    invoiceNumber: string
+    invoiceClient: string
+    invoiceVehicle: string
+    invoiceStartDate: string
+    invoiceEndDate: string
+    invoiceStatus: string
+    invoiceDays: string
+    fieldDailyPrice: string
+    invoiceTotal: string
+    invoiceFooter: string
+  },
+  contract: {
+    id: string
+    clientName: string
+    vehicleName: string
+    startAt: string
+    endAt: string
+    status: string
+    billedDays: number
+    displayDaily: number
+    displayTotal: number
+  },
+): string {
+  const invRef = contract.id.slice(0, 8).toUpperCase()
+  const dateLong = (value: string) =>
+    value
+      ? new Date(value).toLocaleDateString(undefined, {
+          day: '2-digit',
+          month: 'long',
+          year: 'numeric',
+        })
+      : '—'
+  return [
+    `${app.invoiceTitle}`,
+    `${app.invoiceNumber}: ${invRef}`,
+    '',
+    `${app.invoiceClient}: ${contract.clientName}`,
+    `${app.invoiceVehicle}: ${contract.vehicleName}`,
+    `${app.invoiceStartDate}: ${dateLong(contract.startAt)}`,
+    `${app.invoiceEndDate}: ${dateLong(contract.endAt)}`,
+    `${app.invoiceStatus}: ${contract.status}`,
+    '',
+    `${app.invoiceDays}: ${contract.billedDays}`,
+    `${app.fieldDailyPrice}: ${contract.displayDaily} THB`,
+    `${app.invoiceTotal}: ${contract.displayTotal} THB`,
+    '',
+    app.invoiceFooter,
+  ].join('\n')
+}
+
+/** Corps mailto : récap + lien ; tronque si URL trop longue pour certains mobiles. */
+function composeInvoiceMailtoBody(plainText: string, linkIntro: string, signedUrl: string, maxLen = 1900): string {
+  const tail = `\n\n---\n${linkIntro}\n${signedUrl}`
+  if (plainText.length + tail.length <= maxLen) return plainText + tail
+  const headroom = Math.max(0, maxLen - tail.length - 4)
+  return `${plainText.slice(0, headroom)}…${tail}`
+}
+
+function isMobilePdfOpenDevice(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+}
+
 /** Nombre de jours facturés (aligné sur la facture PDF : au moins 1 jour si fin > début). */
 function contractBillableDaysCount(startIso: string, endIso: string): number | null {
   if (!startIso || !endIso) return null
@@ -1993,6 +2060,16 @@ function ContratsPage({
       const { doc } = await buildInvoiceDoc(contract)
       const blob = doc.output('blob')
       const blobUrl = URL.createObjectURL(blob)
+      if (isMobilePdfOpenDevice()) {
+        const opened = window.open(blobUrl, '_blank', 'noopener,noreferrer')
+        if (!opened) {
+          setInvoiceFeedback(app.invoicePdfPopupBlocked)
+        } else {
+          setInvoiceFeedback(app.invoicePdfOpenedInTab)
+        }
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 120000)
+        return
+      }
       setInvoicePreviewUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev)
         return blobUrl
@@ -2015,8 +2092,28 @@ function ContratsPage({
       return
     }
 
+    const plainText = buildInvoicePlainText(app, contract)
     const { doc, filename } = await buildInvoiceDoc(contract)
     const pdfBlob = doc.output('blob')
+    const pdfFile = new File([pdfBlob], filename, { type: 'application/pdf' })
+
+    if (typeof navigator !== 'undefined' && navigator.share && typeof navigator.canShare === 'function') {
+      try {
+        if (navigator.canShare({ files: [pdfFile] })) {
+          await navigator.share({
+            files: [pdfFile],
+            title: `${app.invoiceTitle} ${contract.id.slice(0, 8).toUpperCase()}`,
+            text: plainText,
+          })
+          setInvoiceFeedback(app.invoiceShareSuccess)
+          return
+        }
+      } catch (e: unknown) {
+        const err = e as { name?: string }
+        if (err?.name === 'AbortError') return
+      }
+    }
+
     const filePath = `${ownerId}/contracts/${filename}`
     const { error: uploadError } = await supabase.storage
       .from('invoices')
@@ -2037,8 +2134,8 @@ function ContratsPage({
       return
     }
     const subject = encodeURIComponent(`${app.invoiceTitle} - ${contract.id.slice(0, 8).toUpperCase()}`)
-    const body = encodeURIComponent(`${app.invoiceEmailBody}\n\n${signedData.signedUrl}`)
-    window.location.href = `mailto:${encodeURIComponent(clientEmail)}?subject=${subject}&body=${body}`
+    const body = composeInvoiceMailtoBody(plainText, app.invoiceEmailBody, signedData.signedUrl)
+    window.location.href = `mailto:${encodeURIComponent(clientEmail)}?subject=${subject}&body=${encodeURIComponent(body)}`
     setInvoiceFeedback(app.invoiceEmailReady)
   }
 
@@ -2078,14 +2175,22 @@ function ContratsPage({
       ))}
       {invoiceFeedback && <p className="vehicle-photo-feedback">{invoiceFeedback}</p>}
       {invoicePreviewUrl && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="modal-card" style={{ width: 'min(960px, 95vw)', height: 'min(88vh, 860px)' }}>
-            <div className="row-between" style={{ marginBottom: '8px' }}>
+        <div className="modal-backdrop invoice-preview-backdrop" role="dialog" aria-modal="true">
+          <div className="modal-card invoice-preview-modal">
+            <div className="invoice-preview-header row-between">
               <h3>{app.invoiceTitle}</h3>
               <div className="row-actions">
-                <a href={invoicePreviewUrl} download="invoice.pdf">
+                <a href={invoicePreviewUrl} download="invoice.pdf" className="invoice-preview-download">
                   {app.invoicePdf}
                 </a>
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.open(invoicePreviewUrl, '_blank', 'noopener,noreferrer')
+                  }
+                >
+                  {app.invoiceOpenInNewTab}
+                </button>
                 <button
                   type="button"
                   onClick={() =>
@@ -2099,11 +2204,11 @@ function ContratsPage({
                 </button>
               </div>
             </div>
-            <iframe
-              title="invoice-preview"
-              src={invoicePreviewUrl}
-              style={{ width: '100%', height: '100%', border: '1px solid #e5e7eb', borderRadius: '8px' }}
-            />
+            <div className="invoice-preview-frame">
+              <object data={invoicePreviewUrl} type="application/pdf" aria-label={app.invoiceTitle}>
+                <iframe title="invoice-preview" src={invoicePreviewUrl} />
+              </object>
+            </div>
           </div>
         </div>
       )}

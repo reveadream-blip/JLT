@@ -1407,6 +1407,65 @@ a.kpi-card--link:focus-visible {
   z-index: 60;
 }
 
+.modal-backdrop.invoice-preview-backdrop {
+  z-index: 72;
+}
+
+.modal-card.invoice-preview-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(960px, 96vw) !important;
+  max-width: 100%;
+  max-height: min(92vh, 900px);
+  min-height: 0;
+  height: min(92vh, 900px);
+  box-sizing: border-box;
+}
+
+.invoice-preview-header {
+  flex-shrink: 0;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.invoice-preview-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.invoice-preview-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.invoice-preview-frame object {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f1f5f9;
+}
+
+.invoice-preview-frame iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+a.invoice-preview-download {
+  display: inline-block;
+}
+
 /* Liste clients : vignette passeport + visionneuse plein écran */
 .client-card__top {
   display: flex;
