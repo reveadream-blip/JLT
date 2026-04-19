@@ -2441,7 +2441,6 @@ export function DashboardShell() {
   const [passportViewer, setPassportViewer] = useState<{ url: string; title: string } | null>(null)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const notificationsRef = useRef<HTMLDivElement>(null)
-  const modalFileInputRef = useRef<HTMLInputElement>(null)
   const currentIndex = Math.max(0, menuMeta.findIndex((item) => item.key === section))
   const refreshAppData = async () => {
     setLoadError('')
@@ -3953,14 +3952,40 @@ export function DashboardShell() {
                       />
                       <div className="modal-file-input">
                         <span>{app.contractInspectionPhotosCta}</span>
-                        <div className="modal-file-input__row">
-                          <button
-                            type="button"
-                            className="modal-file-input__pick"
-                            onClick={() => modalFileInputRef.current?.click()}
-                          >
-                            {app.fileInputChooseMultiple}
-                          </button>
+                        <div className="modal-file-input__row modal-file-input__row--vehicle-photo">
+                          <label className="modal-file-input__pick-label">
+                            <span className="modal-file-input__pick">{app.fileInputChooseMultiple}</span>
+                            <input
+                              type="file"
+                              className="modal-file-input__overlay-file"
+                              accept="image/*"
+                              multiple
+                              onChange={(event) => {
+                                const files = Array.from(event.target.files ?? [])
+                                setModalInspectionPhotos((prev) => [...prev, ...files])
+                                event.target.value = ''
+                              }}
+                            />
+                          </label>
+                          <label className="modal-file-input__pick-label">
+                            <span className="modal-file-input__pick">{app.vehiclePhotoTakePhoto}</span>
+                            <input
+                              type="file"
+                              className="modal-file-input__overlay-file"
+                              accept="image/*"
+                              capture="environment"
+                              onChange={(event) => {
+                                const file = event.target.files?.[0]
+                                if (file) {
+                                  setModalInspectionPhotos((prev) => [...prev, file])
+                                }
+                                event.target.value = ''
+                                requestAnimationFrame(() => {
+                                  window.scrollTo(0, 0)
+                                })
+                              }}
+                            />
+                          </label>
                           <span className="modal-file-input__status">
                             {modalInspectionPhotos.length === 0
                               ? app.fileInputNoneSelected
@@ -3970,19 +3995,6 @@ export function DashboardShell() {
                                 )}
                           </span>
                         </div>
-                        <input
-                          ref={modalFileInputRef}
-                          type="file"
-                          className="modal-file-input__hidden"
-                          accept="image/*"
-                          capture="environment"
-                          multiple
-                          onChange={(event) => {
-                            const files = Array.from(event.target.files ?? [])
-                            setModalInspectionPhotos((prev) => [...prev, ...files])
-                            event.target.value = ''
-                          }}
-                        />
                       </div>
                       {modalInspectionPhotos.length > 0 && (
                         <div className="modal-contract-inspection-row">
