@@ -3787,13 +3787,27 @@ export function DashboardShell() {
                   </div>
                   <div className="modal-file-input">
                     <span>{app.clientPassportPhotoCta}</span>
-                    <div className="modal-file-input__row modal-file-input__row--passport">
+                    <div className="modal-file-input__row modal-file-input__row--passport modal-file-input__row--vehicle-photo">
                       <label className="modal-file-input__pick-label">
                         <span className="modal-file-input__pick">{app.fileInputChooseSingle}</span>
                         <input
                           type="file"
                           className="modal-file-input__overlay-file"
                           accept="image/*"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0] ?? null
+                            setModalClientPassportPhoto(file)
+                            event.target.value = ''
+                          }}
+                        />
+                      </label>
+                      <label className="modal-file-input__pick-label">
+                        <span className="modal-file-input__pick">{app.vehiclePhotoTakePhoto}</span>
+                        <input
+                          type="file"
+                          className="modal-file-input__overlay-file"
+                          accept="image/*"
+                          capture="environment"
                           onChange={(event) => {
                             const file = event.target.files?.[0] ?? null
                             setModalClientPassportPhoto(file)
