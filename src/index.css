@@ -9,6 +9,7 @@ html {
 
 body {
   margin: 0;
+  overflow-x: clip;
   font-family:
     Inter,
     system-ui,
@@ -26,6 +27,12 @@ body {
 #root {
   min-height: 100%;
   min-height: 100dvh;
+}
+
+/* Enveloppe commune : hauteur viewport PWA sans imposer display aux vues (dashboard = grid). */
+.app-shell {
+  min-height: 100dvh;
+  min-height: 100vh;
 }
 
 /* Lancement depuis l’icône écran d’accueil (PWA installée) : plein écran sans UI navigateur */

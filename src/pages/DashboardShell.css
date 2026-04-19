@@ -1,8 +1,10 @@
 .dashboard-layout {
   display: grid;
-  grid-template-columns: 204px 1fr;
+  grid-template-columns: 204px minmax(0, 1fr);
+  min-height: 100dvh;
   min-height: 100vh;
   background: #f5f6fa;
+  overflow-x: clip;
 }
 
 .sidebar {
@@ -127,6 +129,8 @@
 }
 
 .dashboard-main {
+  min-width: 0;
+  box-sizing: border-box;
   padding:
     8px
     max(14px, env(safe-area-inset-right))
@@ -368,6 +372,8 @@ ul.notifications-list {
 }
 
 .dashboard-content {
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   background: #fff;
@@ -384,6 +390,7 @@ ul.notifications-list {
 .dashboard-home {
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 .alerts-card {
@@ -445,13 +452,22 @@ ul.notifications-list {
   border-radius: 12px;
   background: #fff;
   padding: 10px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .analysis-top {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 10px;
   margin-bottom: 10px;
+  min-width: 0;
+}
+
+.analysis-top > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .analysis-title {
@@ -462,7 +478,10 @@ ul.notifications-list {
 
 .chips {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+  row-gap: 6px;
+  max-width: 100%;
 }
 
 .chips button {
@@ -486,8 +505,12 @@ ul.notifications-list {
 
 .date-range {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .date-range span,
@@ -501,19 +524,23 @@ ul.notifications-list {
 }
 
 .date-range input {
-  min-width: 128px;
+  min-width: 0;
+  flex: 1 1 120px;
+  max-width: 100%;
 }
 
 .charts-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: 1.3fr 1fr;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  min-width: 0;
 }
 
 .revenue-card,
 .market-card,
 .recent-card,
 .fleet-card {
+  min-width: 0;
   border: 1px solid #e5e7eb;
   border-radius: 10px;
   background: #fff;
@@ -564,6 +591,8 @@ ul.notifications-list {
   overflow: hidden;
   position: relative;
   cursor: ew-resize;
+  max-width: 100%;
+  min-width: 0;
   background:
     linear-gradient(to top, rgba(17, 24, 39, 0.06) 1px, transparent 1px);
   background-size: 100% 28px;
@@ -633,25 +662,32 @@ ul.notifications-list {
 
 .line-axis {
   height: 24px;
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
+  display: flex;
+  flex-wrap: nowrap;
   align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
   color: #94a3b8;
   font-size: 0.66rem;
 }
 
 .line-axis span {
+  flex: 0 0 auto;
   text-align: center;
   white-space: nowrap;
+  min-width: 2.5em;
 }
 
 .market-body {
   margin-top: 8px;
   display: grid;
-  grid-template-columns: 96px 1fr;
+  grid-template-columns: 96px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
+  min-width: 0;
 }
 
 .donut-ring {
@@ -666,6 +702,7 @@ ul.notifications-list {
 .market-list {
   display: grid;
   gap: 7px;
+  min-width: 0;
 }
 
 .market-item {
@@ -706,7 +743,8 @@ ul.notifications-list {
 .bottom-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: 1.35fr 1fr;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  min-width: 0;
 }
 
 .recent-card button {
@@ -1459,7 +1497,7 @@ ul.notifications-list {
   background: #f0fdf4;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 1200px) {
   .dashboard-layout {
     display: flex;
     flex-direction: column;
@@ -1556,7 +1594,28 @@ ul.notifications-list {
   .kpi-row,
   .charts-grid,
   .bottom-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .analysis-top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .date-range {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .date-range input {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
+
+  .revenue-card .row-between,
+  .market-card .row-between {
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
   .toolbar {
@@ -1636,11 +1695,10 @@ ul.notifications-list {
 
 @media (max-width: 640px) {
   .dashboard-main {
-    padding:
-      8px
-      max(10px, env(safe-area-inset-right))
-      calc(12px + env(safe-area-inset-bottom))
-      max(10px, env(safe-area-inset-left));
+    padding-top: max(8px, env(safe-area-inset-top, 0px));
+    padding-right: max(10px, env(safe-area-inset-right, 0px));
+    padding-bottom: calc(72px + 12px + env(safe-area-inset-bottom, 0px));
+    padding-left: max(10px, env(safe-area-inset-left, 0px));
   }
 
   .dashboard-content {

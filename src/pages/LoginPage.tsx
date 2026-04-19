@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { localeOptions, useI18n, type Locale } from '../lib/i18n'
 import { supabase } from '../lib/supabase'
+import './LoginPage.css'
 
 const STRONG_PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*\d).{8,}$/
 
@@ -137,73 +138,38 @@ export function LoginPage() {
   }
 
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        display: 'grid',
-        placeItems: 'center',
-        background: '#f3f4f6',
-        padding: '20px',
-      }}
-    >
-      <section
-        style={{
-          width: '100%',
-          maxWidth: '420px',
-          background: '#fff',
-          borderRadius: '14px',
-          border: '1px solid #e5e7eb',
-          padding: '24px',
-        }}
-      >
-        <h2 style={{ margin: '0 0 12px', fontSize: '1.1rem' }}>
-          {isSignupPage ? authText.signupTab : authText.loginTab}
-        </h2>
+    <main className="login-page">
+      <section className="login-card" aria-labelledby="login-title">
+        <h2 id="login-title">{isSignupPage ? authText.signupTab : authText.loginTab}</h2>
 
         {isSignupPage && (
           <input
+            className="login-field"
             placeholder={authText.fullName}
             value={fullName}
             onChange={(event) => setFullName(event.target.value)}
-            style={{
-              width: '100%',
-              marginBottom: '10px',
-              padding: '10px',
-              borderRadius: '10px',
-              border: '1px solid #e5e7eb',
-            }}
           />
         )}
         <input
+          className="login-field"
           placeholder={authText.email}
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          style={{
-            width: '100%',
-            marginBottom: '10px',
-            padding: '10px',
-            borderRadius: '10px',
-            border: '1px solid #e5e7eb',
-          }}
+          autoComplete="email"
         />
         <input
+          className="login-field"
           placeholder={authText.password}
           type="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
-          style={{
-            width: '100%',
-            marginBottom: '12px',
-            padding: '10px',
-            borderRadius: '10px',
-            border: '1px solid #e5e7eb',
-          }}
+          autoComplete={isSignupPage ? 'new-password' : 'current-password'}
         />
         <select
+          className="login-field"
           aria-label={nav.language}
           value={locale}
           onChange={(event) => setLocale(event.target.value as Locale)}
-          style={{ width: '100%', marginBottom: '12px', padding: '10px', borderRadius: '10px', border: '1px solid #e5e7eb' }}
         >
           {localeOptions.map((option) => (
             <option key={option.value} value={option.value}>
@@ -212,53 +178,25 @@ export function LoginPage() {
           ))}
         </select>
 
-        <button
-          type="button"
-          onClick={() => void onSubmit()}
-          disabled={loading}
-          style={{
-            width: '100%',
-            border: '0',
-            borderRadius: '10px',
-            padding: '12px',
-            background: '#f59e0b',
-            color: '#111827',
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-        >
+        <button type="button" className="login-submit" onClick={() => void onSubmit()} disabled={loading}>
           {isSignupPage ? authText.signUp : authText.sendCode}
         </button>
 
         {!isSignupPage && codeSent && (
           <>
             <input
+              className="login-field login-field--mt"
               placeholder={authText.otpCode}
               value={otpCode}
               onChange={(event) => setOtpCode(event.target.value)}
-              style={{
-                width: '100%',
-                marginTop: '10px',
-                marginBottom: '10px',
-                padding: '10px',
-                borderRadius: '10px',
-                border: '1px solid #e5e7eb',
-              }}
+              inputMode="numeric"
+              autoComplete="one-time-code"
             />
             <button
               type="button"
+              className="login-secondary"
               onClick={() => void onVerifyCode()}
               disabled={loading}
-              style={{
-                width: '100%',
-                border: '1px solid #e5e7eb',
-                borderRadius: '10px',
-                padding: '12px',
-                background: '#fff',
-                color: '#111827',
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
             >
               {authText.verifyCode}
             </button>
@@ -266,45 +204,23 @@ export function LoginPage() {
         )}
 
         {message && (
-          <p style={{ marginTop: '10px', color: '#166534', fontSize: '0.9rem' }}>{message}</p>
+          <p className="login-feedback login-feedback--ok" role="status">
+            {message}
+          </p>
         )}
         {error && (
-          <p style={{ marginTop: '10px', color: '#b91c1c', fontSize: '0.9rem' }}>{error}</p>
+          <p className="login-feedback login-feedback--err" role="alert">
+            {error}
+          </p>
         )}
 
-        <div
-          style={{
-            marginTop: '14px',
-            paddingTop: '12px',
-            borderTop: '1px solid #e5e7eb',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '12px',
-          }}
-        >
+        <div className="login-footer">
           {!isSignupPage ? (
-            <Link
-              to="/inscription"
-              style={{
-                color: '#2563eb',
-                textDecoration: 'none',
-              }}
-            >
-              {authText.signupTab}
-            </Link>
+            <Link to="/inscription">{authText.signupTab}</Link>
           ) : (
             <span />
           )}
-          <Link
-            to="/"
-            style={{
-              color: '#2563eb',
-              textDecoration: 'none',
-            }}
-          >
-            {authText.backHome}
-          </Link>
+          <Link to="/">{authText.backHome}</Link>
         </div>
       </section>
     </main>
