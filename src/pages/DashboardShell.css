@@ -4,7 +4,8 @@
   min-height: 100dvh;
   min-height: 100vh;
   background: #f5f6fa;
-  overflow-x: clip;
+  /* Ne pas clipper : le panneau notifications est en absolute et doit pouvoir dépasser la grille */
+  overflow-x: visible;
 }
 
 .sidebar {
@@ -210,11 +211,24 @@
   border: 1px solid #d1d5db;
   border-radius: 8px;
   background: #fff;
+  color: #374151;
   position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 7px 10px;
+  cursor: pointer;
+}
+
+.ghost-btn svg {
+  flex-shrink: 0;
+  color: inherit;
+  stroke: currentColor;
+}
+
+.notifications-wrap .ghost-btn {
+  justify-content: center;
+  min-width: 40px;
 }
 
 .notif-badge {
@@ -247,7 +261,7 @@
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12);
-  z-index: 80;
+  z-index: 90;
   padding: 12px 14px;
   text-align: left;
 }
@@ -342,17 +356,43 @@ ul.notifications-list {
   border-radius: 8px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 8px 10px;
   min-height: 42px;
+}
+
+.search-box svg {
+  flex-shrink: 0;
+  display: block;
   color: #9ca3af;
+  stroke: currentColor;
 }
 
 .search-box input {
   width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
   border: 0;
-  outline: 0;
+  outline: none;
   font-size: 0.82rem;
+  color: #1f2937;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.search-box input::placeholder {
+  color: #9ca3af;
+  opacity: 1;
+}
+
+.search-box:focus-within {
+  outline: none;
+  border-color: #e5e7eb;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.22);
 }
 
 .toolbar-actions {
@@ -1199,10 +1239,62 @@ ul.notifications-list {
 
 .airtag-editor input {
   flex: 1;
+  min-width: 0;
+  margin: 0;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 6px 8px;
   font-size: 0.72rem;
+  color: #1f2937;
+  background: #fff;
+  -webkit-appearance: none;
+  appearance: none;
+  box-shadow: none;
+  outline: none;
+}
+
+.airtag-editor input::placeholder {
+  color: #9ca3af;
+  opacity: 1;
+}
+
+.airtag-editor input:focus {
+  outline: none;
+  border-color: #e5e7eb;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.22);
+}
+
+/* Page Carte : lat / lng — même reset que la recherche (pas de barres natives) */
+.carte-coords {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.carte-coords input {
+  flex: 1 1 120px;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 0.72rem;
+  color: #1f2937;
+  background: #fff;
+  -webkit-appearance: none;
+  appearance: none;
+  box-shadow: none;
+  outline: none;
+}
+
+.carte-coords input::placeholder {
+  color: #9ca3af;
+  opacity: 1;
+}
+
+.carte-coords input:focus {
+  outline: none;
+  border-color: #e5e7eb;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.22);
 }
 
 .airtag-editor button {
@@ -1632,6 +1724,12 @@ ul.notifications-list {
   .top-actions {
     width: 100%;
     flex-wrap: wrap;
+  }
+
+  /* Bouton cloche à gauche de la ligne : ancrer le panneau à gauche pour qu’il reste dans l’écran */
+  .notifications-panel {
+    left: 0;
+    right: auto;
   }
 
   .top-actions .ghost-btn,

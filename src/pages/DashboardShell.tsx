@@ -1766,7 +1766,7 @@ function CartePage({
                 <div>
                   <h4>{name}</h4>
                   <p>{`${app.airtagPlaceholder}: ${vehicle.airtag_code || '-'}`}</p>
-                  <div className="row-actions">
+                  <div className="row-actions carte-coords">
                     <input
                       value={pos.lat}
                       onChange={(event) =>
@@ -1776,6 +1776,8 @@ function CartePage({
                         }))
                       }
                       placeholder={app.mapLat}
+                      inputMode="decimal"
+                      autoComplete="off"
                     />
                     <input
                       value={pos.lng}
@@ -1786,6 +1788,8 @@ function CartePage({
                         }))
                       }
                       placeholder={app.mapLng}
+                      inputMode="decimal"
+                      autoComplete="off"
                     />
                     <button type="button" onClick={onSavePosition}>
                       {app.mapSavePosition}
