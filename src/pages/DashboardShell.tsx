@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -29,6 +30,7 @@ import {
   parseVehiclePhotoObjectKey,
   vehicleIdFromVehiclePhotoPath,
   vehiclePhotosUsePublicUrl,
+  buildVehiclePhotoStoragePath,
 } from '../lib/supabase'
 import './DashboardShell.css'
 
@@ -37,23 +39,6 @@ const isPublicDemoMode = import.meta.env.VITE_PUBLIC_DEMO_MODE === 'true'
 
 function normalizeVehicleLabel(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ')
-}
-
-/** URL affichable pour une clé ou URL Storage (signée ou publique selon le bucket). */
-async function resolveVehiclePhotoUrl(rawPath: string): Promise<string> {
-  const key = parseVehiclePhotoObjectKey(rawPath)
-  if (vehiclePhotosUsePublicUrl) {
-    const { data } = supabase.storage.from(vehiclePhotosBucket).getPublicUrl(key)
-    return data.publicUrl
-  }
-  const { data, error } = await supabase.storage
-    .from(vehiclePhotosBucket)
-    .createSignedUrl(key, 60 * 60)
-  if (error || !data?.signedUrl) {
-    console.warn(`[${vehiclePhotosBucket}] signed URL`, key, error?.message ?? '')
-    return ''
-  }
-  return data.signedUrl
 }
 
 /**
@@ -714,6 +699,49 @@ function VehiculesPage({
   const [feedback, setFeedback] = useState('')
   const [error, setError] = useState('')
   const [vehicleTab, setVehicleTab] = useState<'fleet' | 'revisions'>('fleet')
+
+  /** Suivi des blob: URLs pour les révoquer (affichage via download(), pas /object/sign/). */
+  const vehiclePhotoBlobUrlsRef = useRef<string[]>([])
+
+  const revokeVehiclePhotoBlobs = useCallback(() => {
+    vehiclePhotoBlobUrlsRef.current.forEach((u) => {
+      try {
+        URL.revokeObjectURL(u)
+      } catch {
+        /* ignore */
+      }
+    })
+    vehiclePhotoBlobUrlsRef.current = []
+  }, [])
+
+  /**
+   * Bucket public : URL directe. Sinon : download authentifié + blob (évite les 400 sur les URLs signées /object/sign/).
+   */
+  const resolveVehiclePhotoUrl = useCallback(async (rawPath: string): Promise<string> => {
+    const key = parseVehiclePhotoObjectKey(rawPath)
+    if (vehiclePhotosUsePublicUrl) {
+      const { data } = supabase.storage.from(vehiclePhotosBucket).getPublicUrl(key)
+      return data.publicUrl
+    }
+    const { data: blob, error } = await supabase.storage.from(vehiclePhotosBucket).download(key)
+    if (!error && blob) {
+      const url = URL.createObjectURL(blob)
+      vehiclePhotoBlobUrlsRef.current.push(url)
+      return url
+    }
+    /* Démo en ligne : si download échoue (policy / réseau), tenter une URL signée sur le préfixe demo/ */
+    if (isPublicDemoMode && key.startsWith('demo/')) {
+      const { data: signed, error: signErr } = await supabase.storage
+        .from(vehiclePhotosBucket)
+        .createSignedUrl(key, 60 * 60)
+      if (!signErr && signed?.signedUrl) return signed.signedUrl
+    }
+    console.warn(`[${vehiclePhotosBucket}] download`, key, error?.message ?? '')
+    return ''
+  }, [])
+
+  useEffect(() => () => revokeVehiclePhotoBlobs(), [revokeVehiclePhotoBlobs])
+
   useEffect(() => {
     if (searchParams.get('tab') === 'revisions') {
       setVehicleTab('revisions')
@@ -824,6 +852,7 @@ function VehiculesPage({
     const loadPhotos = async () => {
       const userId = sessionUserId
       if (!userId) {
+        revokeVehiclePhotoBlobs()
         setVehiclePhotos({})
         setVehicleGalleries({})
         return
@@ -839,10 +868,13 @@ function VehiculesPage({
         return
       }
       if (!rows?.length) {
+        revokeVehiclePhotoBlobs()
         setVehiclePhotos({})
         setVehicleGalleries({})
         return
       }
+
+      revokeVehiclePhotoBlobs()
 
       type PhotoRow = (typeof rows)[number]
       const rowsForVehicle = (v: { id: string; brand: string; model: string }) => {
@@ -892,7 +924,7 @@ function VehiculesPage({
     }
 
     void loadPhotos()
-  }, [sessionUserId, vehiclesData])
+  }, [sessionUserId, vehiclesData, revokeVehiclePhotoBlobs])
 
   useEffect(() => {
     const nextDrafts: Record<string, string> = {}
@@ -937,7 +969,14 @@ function VehiculesPage({
       const extension = compressedFile.name.split('.').pop() || 'jpg'
       const normalizedVehicleLabel = normalizeVehicleLabel(vehicleName)
       const safeVehicle = normalizedVehicleLabel.replace(/\s+/g, '-')
-      const filePath = `${sessionUserId}/${safeVehicle}/${Date.now()}.${extension}`
+      const fileName = `${Date.now()}.${extension}`
+      const filePath = buildVehiclePhotoStoragePath({
+        isPublicDemo: isPublicDemoMode,
+        userId: sessionUserId,
+        vehicleId,
+        vehicleSlugForTabUpload: isPublicDemoMode ? undefined : safeVehicle,
+        fileName,
+      })
 
       const { error: uploadError } = await supabase.storage
         .from(vehiclePhotosBucket)
@@ -970,7 +1009,11 @@ function VehiculesPage({
       if (!displayUrl) {
         setError(app.vehiclePhotoError)
       } else {
-        setVehiclePhotos((prev) => ({ ...prev, [vehicleId]: displayUrl }))
+        setVehiclePhotos((prev) => {
+          const old = prev[vehicleId]
+          if (old?.startsWith('blob:')) URL.revokeObjectURL(old)
+          return { ...prev, [vehicleId]: displayUrl }
+        })
         setVehicleGalleries((prev) => ({
           ...prev,
           [vehicleId]: [
@@ -990,6 +1033,8 @@ function VehiculesPage({
   const onDeleteVehiclePhoto = async (vehicleId: string, photoId: string, filePath: string) => {
     setFeedback('')
     setError('')
+    const removed = (vehicleGalleries[vehicleId] ?? []).find((item) => item.id === photoId)
+    if (removed?.signedUrl?.startsWith('blob:')) URL.revokeObjectURL(removed.signedUrl)
     const { error: removeStorageError } = await supabase.storage
       .from(vehiclePhotosBucket)
       .remove([parseVehiclePhotoObjectKey(filePath)])
@@ -1007,7 +1052,7 @@ function VehiculesPage({
     }))
     setVehiclePhotos((prev) => ({
       ...prev,
-      [vehicleId]: remaining[0]?.signedUrl || prev[vehicleId],
+      [vehicleId]: remaining[0]?.signedUrl ?? '',
     }))
   }
 
@@ -2442,7 +2487,13 @@ export function DashboardShell() {
       } else if (modalVehiclePhoto && createdVehicle) {
         const compressedPhoto = await compressImageFile(modalVehiclePhoto)
         const extension = compressedPhoto.name.split('.').pop() || 'jpg'
-        const filePath = `${ownerId}/${createdVehicle.id}/${Date.now()}.${extension}`
+        const fileName = `${Date.now()}.${extension}`
+        const filePath = buildVehiclePhotoStoragePath({
+          isPublicDemo: isPublicDemoMode,
+          userId: ownerId,
+          vehicleId: createdVehicle.id,
+          fileName,
+        })
         const { error: uploadError } = await supabase.storage
           .from(vehiclePhotosBucket)
           .upload(filePath, compressedPhoto, {

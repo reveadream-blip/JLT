@@ -41,15 +41,47 @@ export function parseVehiclePhotoObjectKey(raw: string): string {
   return s
 }
 
-/** UUID du véhicule dans le chemin `userId/<uuid>/fichier` (upload à la création). */
+/**
+ * UUID du véhicule dans le chemin :
+ * - `userId/<uuid>/fichier` (création véhicule hors démo)
+ * - `demo/<userId>/<uuid>/fichier` (démo publique)
+ * - `userId/<slug>/fichier` (upload onglet) → pas d’UUID au segment attendu → null
+ */
 export function vehicleIdFromVehiclePhotoPath(path: string): string | null {
   const clean = parseVehiclePhotoObjectKey(path)
   const parts = clean.split('/').filter(Boolean)
   if (parts.length < 2) return null
-  const seg = parts[1]
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg)
-    ? seg
+  const isDemo = parts[0] === 'demo'
+  const candidate = isDemo && parts.length >= 3 ? parts[2] : parts[1]
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidate)
+    ? candidate
     : null
+}
+
+/** Préfixe réservé aux photos visibles par tous en démo (policies Storage `demo/`). */
+export const vehiclePhotosDemoPrefix = 'demo' as const
+
+/**
+ * Chemin objet Storage pour une photo véhicule.
+ * - Démo (`isPublicDemo`) : `demo/{userId}/{vehicleId}/{fichier}` → lecture ouverte (voir SQL).
+ * - Sinon : `userId/{vehicleSlug ou vehicleId}/{fichier}` comme avant.
+ */
+export function buildVehiclePhotoStoragePath(options: {
+  isPublicDemo: boolean
+  userId: string
+  vehicleId: string
+  /** Onglet véhicule (hors démo) : dossier = slug du nom */
+  vehicleSlugForTabUpload?: string
+  fileName: string
+}): string {
+  const { isPublicDemo, userId, vehicleId, vehicleSlugForTabUpload, fileName } = options
+  if (isPublicDemo) {
+    return `${vehiclePhotosDemoPrefix}/${userId}/${vehicleId}/${fileName}`
+  }
+  if (vehicleSlugForTabUpload !== undefined) {
+    return `${userId}/${vehicleSlugForTabUpload}/${fileName}`
+  }
+  return `${userId}/${vehicleId}/${fileName}`
 }
 
 export async function checkSupabaseConnection() {

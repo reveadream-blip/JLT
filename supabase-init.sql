@@ -222,32 +222,54 @@ for delete using (
   and auth.uid()::text = (storage.foldername(name))[1]
 );
 
+-- vehicle-photos : voir supabase-vehicle-photos-demo-access.sql (préfixe demo/ = lecture publique)
 drop policy if exists "vehicle_photos_bucket_select" on storage.objects;
 create policy "vehicle_photos_bucket_select" on storage.objects
 for select using (
   bucket_id = 'vehicle-photos'
-  and auth.uid()::text = (storage.foldername(name))[1]
+  and (
+    (auth.uid() is not null and auth.uid()::text = (storage.foldername(name))[1])
+    or (storage.foldername(name))[1] = 'demo'
+  )
 );
 
 drop policy if exists "vehicle_photos_bucket_insert" on storage.objects;
 create policy "vehicle_photos_bucket_insert" on storage.objects
 for insert with check (
   bucket_id = 'vehicle-photos'
-  and auth.uid()::text = (storage.foldername(name))[1]
+  and (
+    auth.uid()::text = (storage.foldername(name))[1]
+    or (
+      (storage.foldername(name))[1] = 'demo'
+      and (storage.foldername(name))[2] = auth.uid()::text
+    )
+  )
 );
 
 drop policy if exists "vehicle_photos_bucket_update" on storage.objects;
 create policy "vehicle_photos_bucket_update" on storage.objects
 for update using (
   bucket_id = 'vehicle-photos'
-  and auth.uid()::text = (storage.foldername(name))[1]
+  and (
+    auth.uid()::text = (storage.foldername(name))[1]
+    or (
+      (storage.foldername(name))[1] = 'demo'
+      and (storage.foldername(name))[2] = auth.uid()::text
+    )
+  )
 );
 
 drop policy if exists "vehicle_photos_bucket_delete" on storage.objects;
 create policy "vehicle_photos_bucket_delete" on storage.objects
 for delete using (
   bucket_id = 'vehicle-photos'
-  and auth.uid()::text = (storage.foldername(name))[1]
+  and (
+    auth.uid()::text = (storage.foldername(name))[1]
+    or (
+      (storage.foldername(name))[1] = 'demo'
+      and (storage.foldername(name))[2] = auth.uid()::text
+    )
+  )
 );
 
 -- Optional starter pricing rows for current user (run after signup)
