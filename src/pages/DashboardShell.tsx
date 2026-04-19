@@ -1838,8 +1838,7 @@ function ContratsPage({
     const pageW = 210
     const margin = 18
     const contentW = pageW - margin * 2
-    const fmtMoney = (n: number) =>
-      n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const fmtMoney = (n: number) => String(Math.round(Number(n)))
     const dateLong = (value: string) =>
       value
         ? new Date(value).toLocaleDateString('fr-FR', {
