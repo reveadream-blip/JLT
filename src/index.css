@@ -27,3 +27,12 @@ body {
   min-height: 100%;
   min-height: 100dvh;
 }
+
+/* Lancement depuis l’icône écran d’accueil (PWA installée) : plein écran sans UI navigateur */
+@media (display-mode: standalone) {
+  html,
+  body,
+  #root {
+    min-height: 100dvh;
+  }
+}

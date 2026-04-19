@@ -8,6 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      injectRegister: null,
       includeAssets: ['favicon.svg', 'pwa-192.png', 'pwa-512.png', 'apple-touch-icon.png'],
       manifest: {
         name: 'JLT — Just Lease Tech',
@@ -17,27 +18,28 @@ export default defineConfig({
         theme_color: '#081738',
         background_color: '#f5f6fa',
         display: 'standalone',
-        display_override: ['standalone', 'browser'],
+        display_override: ['standalone', 'minimal-ui', 'browser'],
         orientation: 'any',
         scope: '/',
         start_url: '/',
+        id: '/',
         lang: 'fr',
         categories: ['business', 'productivity'],
         icons: [
           {
-            src: 'pwa-192.png',
+            src: '/pwa-192.png',
             sizes: '192x192',
             type: 'image/png',
             purpose: 'any',
           },
           {
-            src: 'pwa-512.png',
+            src: '/pwa-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'any',
           },
           {
-            src: 'pwa-512.png',
+            src: '/pwa-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable',
