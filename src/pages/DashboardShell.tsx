@@ -2785,6 +2785,23 @@ export function DashboardShell() {
                 <p>{invoiceProfile.companyAddress}</p>
               </div>
             </div>
+            <div className="dashboard-mobile-extras">
+              <select
+                className="sidebar-lang"
+                aria-label={t('nav').language}
+                value={locale}
+                onChange={(event) => setLocale(event.target.value as any)}
+              >
+                {localeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <Link to="/" className="dashboard-mobile-back">
+                {app.backSite}
+              </Link>
+            </div>
           </div>
           <div className="top-actions">
             <div className="notifications-wrap" ref={notificationsRef}>
@@ -3177,6 +3194,21 @@ export function DashboardShell() {
           </div>
         )}
       </section>
+
+      <nav className="dashboard-bottom-nav" aria-label={t('nav').mainNav}>
+        {menuMeta.map(({ key, icon: Icon }, index) => (
+          <NavLink
+            key={key}
+            to={`/app/${key}`}
+            className={({ isActive }) =>
+              isActive ? 'dashboard-bottom-nav-item active' : 'dashboard-bottom-nav-item'
+            }
+          >
+            <Icon size={22} strokeWidth={2} aria-hidden />
+            <span>{app.menu[index]}</span>
+          </NavLink>
+        ))}
+      </nav>
     </div>
   )
 }

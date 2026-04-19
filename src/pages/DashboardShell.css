@@ -134,6 +134,14 @@
     max(14px, env(safe-area-inset-left));
 }
 
+.dashboard-mobile-extras {
+  display: none;
+}
+
+.dashboard-bottom-nav {
+  display: none;
+}
+
 .dashboard-top {
   display: flex;
   justify-content: space-between;
@@ -1453,11 +1461,93 @@ ul.notifications-list {
 
 @media (max-width: 960px) {
   .dashboard-layout {
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
+    min-height: 100dvh;
+    min-height: 100vh;
   }
 
   .sidebar {
     display: none;
+  }
+
+  .dashboard-main {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-top: max(8px, env(safe-area-inset-top, 0px));
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .dashboard-mobile-extras {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .dashboard-mobile-back {
+    font-size: 0.75rem;
+    color: #2563eb;
+    text-decoration: none;
+    font-weight: 600;
+  }
+
+  .dashboard-bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 50;
+    flex-shrink: 0;
+    gap: 2px;
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: #fff;
+    border-top: 1px solid #e2e8f0;
+    box-shadow: 0 -6px 24px rgba(8, 23, 56, 0.1);
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .dashboard-bottom-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-width: 68px;
+    max-width: 88px;
+    flex: 0 0 auto;
+    padding: 6px 4px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: #64748b;
+    font-size: 0.58rem;
+    font-weight: 600;
+    text-align: center;
+    line-height: 1.15;
+  }
+
+  .dashboard-bottom-nav-item span {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+  }
+
+  .dashboard-bottom-nav-item.active {
+    color: #b45309;
+    background: #fff7ed;
+  }
+
+  .dashboard-bottom-nav-item svg {
+    flex-shrink: 0;
+    color: inherit;
   }
 
   .panel-grid,
