@@ -45,10 +45,36 @@ Deno.serve(async (req) => {
   }
   try {
     const authHeader = req.headers.get('Authorization') || ''
-    const jwt = authHeader.replace('Bearer ', '')
-    const { data: userData } = await supabaseAdmin.auth.getUser(jwt)
+    if (!authHeader) {
+      return jsonResponse({ error: 'Missing Authorization header' }, 401)
+    }
+    const jwt = authHeader.replace('Bearer ', '').trim()
+    if (!jwt) {
+      return jsonResponse({ error: 'Empty bearer token' }, 401)
+    }
+    const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt)
+    if (userError) {
+      return jsonResponse(
+        { error: `Token verification failed: ${userError.message}` },
+        401,
+      )
+    }
     const user = userData.user
-    if (!user) return jsonResponse({ error: 'Unauthorized' }, 401)
+    if (!user) {
+      return jsonResponse(
+        { error: 'No user resolved from token (probably anon key or expired session)' },
+        401,
+      )
+    }
+    if (user.is_anonymous) {
+      return jsonResponse(
+        { error: 'Anonymous users cannot subscribe. Create a real account first.' },
+        401,
+      )
+    }
+    if (!user.email) {
+      return jsonResponse({ error: 'User has no email on file' }, 400)
+    }
 
     const body = await req.json()
     const planCode = String(body.planCode || '')
