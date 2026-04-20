@@ -2893,7 +2893,28 @@ export function DashboardShell() {
     })
     setPendingCheckoutCode('')
     if (error) {
-      setLoadError(error.message)
+      // supabase.functions.invoke masque le vrai message d'erreur derriere
+      // "Edge Function returned a non-2xx status code". On lit le body de la
+      // reponse pour exposer la vraie cause (Stripe key invalide, plan
+      // inconnu, secret manquant, etc.)
+      let detail = error.message
+      try {
+        const ctx = (error as unknown as { context?: Response }).context
+        if (ctx && typeof ctx.text === 'function') {
+          const raw = await ctx.text()
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw) as { error?: string }
+              if (parsed?.error) detail = `${error.message} — ${parsed.error}`
+            } catch {
+              detail = `${error.message} — ${raw.slice(0, 200)}`
+            }
+          }
+        }
+      } catch {
+        // ignore parsing errors
+      }
+      setLoadError(detail)
       return
     }
     if (data?.url) {
