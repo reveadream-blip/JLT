@@ -50,6 +50,17 @@ create index if not exists idx_billing_subscriptions_owner_id on public.billing_
 create index if not exists idx_billing_subscriptions_status_end on public.billing_subscriptions(status, current_period_end);
 create index if not exists idx_billing_payments_owner_id on public.billing_payments(owner_id);
 
+-- Le webhook Stripe upsert via external_subscription_id : un index + une
+-- contrainte unique partielle empechent les doublons et accelerent le lookup.
+create unique index if not exists uniq_billing_subscriptions_external_sub
+  on public.billing_subscriptions(external_subscription_id)
+  where external_subscription_id is not null;
+
+-- Idem pour les paiements (le webhook update via external_payment_id).
+create index if not exists idx_billing_payments_external_payment
+  on public.billing_payments(external_payment_id)
+  where external_payment_id is not null;
+
 alter table public.billing_subscriptions enable row level security;
 alter table public.billing_payments enable row level security;
 
