@@ -25,22 +25,39 @@ const PLAN_TO_PRICE_ENV: Record<string, string> = {
   promptpay_yearly_9900: 'STRIPE_PRICE_PROMPTPAY_YEARLY_9900',
 }
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Max-Age': '86400',
+}
+
+const jsonResponse = (payload: unknown, status = 200) =>
+  new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+
 Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
   try {
     const authHeader = req.headers.get('Authorization') || ''
     const jwt = authHeader.replace('Bearer ', '')
     const { data: userData } = await supabaseAdmin.auth.getUser(jwt)
     const user = userData.user
-    if (!user) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
+    if (!user) return jsonResponse({ error: 'Unauthorized' }, 401)
 
     const body = await req.json()
     const planCode = String(body.planCode || '')
     const successUrl = String(body.successUrl || '')
     const cancelUrl = String(body.cancelUrl || '')
     const priceEnv = PLAN_TO_PRICE_ENV[planCode]
-    if (!priceEnv) return new Response(JSON.stringify({ error: 'Unknown plan code' }), { status: 400 })
+    if (!priceEnv) return jsonResponse({ error: 'Unknown plan code' }, 400)
     const priceId = Deno.env.get(priceEnv)
-    if (!priceId) return new Response(JSON.stringify({ error: `Missing price env: ${priceEnv}` }), { status: 400 })
+    if (!priceId) return jsonResponse({ error: `Missing price env: ${priceEnv}` }, 400)
 
     const isStripeRecurring = planCode === 'stripe_monthly_auto_990'
     const sharedMetadata = {
@@ -77,8 +94,8 @@ Deno.serve(async (req) => {
       metadata: { checkout_mode: session.mode },
     })
 
-    return new Response(JSON.stringify({ checkoutUrl: session.url }), { status: 200 })
+    return jsonResponse({ checkoutUrl: session.url }, 200)
   } catch (error) {
-    return new Response(JSON.stringify({ error: String(error) }), { status: 500 })
+    return jsonResponse({ error: String(error) }, 500)
   }
 })
