@@ -1,0 +1,17 @@
+# Supabase project configuration
+# Les Edge Functions liees au paiement verifient elles-memes le JWT via
+# supabaseAdmin.auth.getUser(jwt), qui supporte aussi bien HS256 que ES256.
+# On desactive la verification JWT au niveau du gateway pour eviter
+# UNAUTHORIZED_UNSUPPORTED_TOKEN_ALGORITHM quand le projet est migre
+# vers les nouvelles JWT Signing Keys (ES256).
+
+project_id = "xaplhaibffgxwjaavspz"
+
+[functions.create-checkout-session]
+verify_jwt = false
+
+[functions.stripe-webhook]
+# Stripe envoie une signature dans l'en-tete stripe-signature (pas un JWT
+# Supabase). On doit imperativement recevoir la requete sans verification
+# JWT sinon Stripe ne peut pas appeler la fonction.
+verify_jwt = false
