@@ -9,6 +9,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
+// Exportes pour permettre des appels fetch directs vers Edge Functions
+// (utile quand on veut acceder au status code et au body d'erreur reels,
+// que supabase.functions.invoke masque derriere un message generique).
+export const SUPABASE_URL: string = supabaseUrl
+export const SUPABASE_ANON_KEY: string = supabaseAnonKey
+
 /** Bucket Storage pour les photos véhicules (aligner avec Supabase Storage ; override via VITE_VEHICLE_PHOTOS_BUCKET). */
 export const vehiclePhotosBucket =
   (import.meta.env.VITE_VEHICLE_PHOTOS_BUCKET as string | undefined)?.trim() ||

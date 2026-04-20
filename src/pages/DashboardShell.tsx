@@ -26,6 +26,8 @@ import { localeOptions, useI18n } from '../lib/i18n'
 import { Link, NavLink, useParams, useSearchParams } from 'react-router-dom'
 import {
   supabase,
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY,
   vehiclePhotosBucket,
   parseVehiclePhotoObjectKey,
   vehicleIdFromVehiclePhotoPath,
@@ -2888,44 +2890,60 @@ export function DashboardShell() {
       cancelUrl: `${window.location.origin}/app/abonnement`,
       locale,
     }
-    const { data, error } = await supabase.functions.invoke('create-checkout-session', {
-      body: payload,
-    })
+    // Appel fetch direct (au lieu de supabase.functions.invoke) pour pouvoir
+    // lire le status HTTP et le body d'erreur reels. invoke() consomme deja
+    // le body en interne et nous renvoie un message generique
+    // ("Edge Function returned a non-2xx status code") qui n'aide personne.
+    const accessToken = session?.access_token
+    if (!accessToken) {
+      setPendingCheckoutCode('')
+      setLoadError('No access token in session — please log in again.')
+      return
+    }
+    const endpoint = `${SUPABASE_URL.replace(/\/+$/, '')}/functions/v1/create-checkout-session`
+    let response: Response
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+          apikey: SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify(payload),
+      })
+    } catch (networkError) {
+      setPendingCheckoutCode('')
+      const msg = networkError instanceof Error ? networkError.message : String(networkError)
+      setLoadError(`Network error reaching create-checkout-session: ${msg}`)
+      return
+    }
     setPendingCheckoutCode('')
-    if (error) {
-      // supabase.functions.invoke masque le vrai message d'erreur derriere
-      // "Edge Function returned a non-2xx status code". On lit le body de la
-      // reponse pour exposer la vraie cause (Stripe key invalide, plan
-      // inconnu, secret manquant, etc.)
-      let detail = error.message
-      try {
-        const ctx = (error as unknown as { context?: Response }).context
-        if (ctx && typeof ctx.text === 'function') {
-          const raw = await ctx.text()
-          if (raw) {
-            try {
-              const parsed = JSON.parse(raw) as { error?: string }
-              if (parsed?.error) detail = `${error.message} — ${parsed.error}`
-            } catch {
-              detail = `${error.message} — ${raw.slice(0, 200)}`
-            }
-          }
-        }
-      } catch {
-        // ignore parsing errors
-      }
-      setLoadError(detail)
+    const rawBody = await response.text().catch(() => '')
+    let parsedBody: { url?: string; checkoutUrl?: string; error?: string } | null = null
+    if (rawBody) {
+      try { parsedBody = JSON.parse(rawBody) } catch { parsedBody = null }
+    }
+    if (!response.ok) {
+      const detail =
+        parsedBody?.error ||
+        rawBody.slice(0, 300) ||
+        response.statusText ||
+        'Unknown error'
+      setLoadError(`create-checkout-session HTTP ${response.status}: ${detail}`)
+      console.error('[checkout] failed', {
+        status: response.status,
+        statusText: response.statusText,
+        body: rawBody,
+      })
       return
     }
-    if (data?.url) {
-      window.location.href = data.url
+    const checkoutUrl = parsedBody?.url || parsedBody?.checkoutUrl
+    if (checkoutUrl) {
+      window.location.href = checkoutUrl
       return
     }
-    if (data?.checkoutUrl) {
-      window.location.href = data.checkoutUrl
-      return
-    }
-    setLoadError('Checkout URL missing')
+    setLoadError(`Checkout URL missing in response: ${rawBody.slice(0, 200) || '(empty body)'}`)
   }
 
   const onDeleteClient = async (clientId: string) => {
