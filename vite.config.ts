@@ -49,7 +49,25 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//],
+        navigateFallbackDenylist: [
+          /^\/api\//,
+          // Ne jamais intercepter les appels Supabase (auth, REST, Storage,
+          // Edge Functions). Sinon le SW peut servir une vieille reponse en
+          // cache ou renvoyer ERR_INTERNET_DISCONNECTED sur des endpoints
+          // qui n'existaient pas a la version precedente.
+          /^https?:\/\/[^/]+\.supabase\.co\//,
+        ],
+        // Force le nouveau SW a prendre le controle immediatement, sans
+        // attendre que tous les onglets soient fermes. Indispensable pour
+        // que les correctifs deployes soient effectifs des le rechargement
+        // suivant chez les utilisateurs deja installes.
+        clientsClaim: true,
+        skipWaiting: true,
+        cleanupOutdatedCaches: true,
+        // Ne jamais mettre en cache les requetes vers les domaines
+        // d'API externes (Supabase, Stripe). On laisse le navigateur
+        // les gerer directement.
+        navigationPreload: false,
       },
       devOptions: {
         enabled: false,
