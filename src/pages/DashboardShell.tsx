@@ -16,6 +16,7 @@ import {
   ClipboardList,
   CreditCard,
   LayoutDashboard,
+  LogOut,
   Plus,
   Search,
   Users,
@@ -3732,10 +3733,27 @@ export function DashboardShell() {
             >
               {app.invoiceProfile}
             </button>
-            <button type="button" className="accent-btn top-actions__primary" onClick={onOpenCreateModal}>
-              <Plus size={14} />
-              {primaryActionLabel}
-            </button>
+            {section === 'abonnement' ? (
+              <button
+                type="button"
+                className="accent-btn top-actions__primary"
+                onClick={async () => {
+                  try {
+                    await supabase.auth.signOut()
+                  } finally {
+                    window.location.href = '/connexion'
+                  }
+                }}
+              >
+                <LogOut size={14} />
+                {t('auth').signOut}
+              </button>
+            ) : (
+              <button type="button" className="accent-btn top-actions__primary" onClick={onOpenCreateModal}>
+                <Plus size={14} />
+                {primaryActionLabel}
+              </button>
+            )}
           </div>
         </header>
 
