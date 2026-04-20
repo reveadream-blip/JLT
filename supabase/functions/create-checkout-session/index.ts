@@ -43,16 +43,26 @@ Deno.serve(async (req) => {
     if (!priceId) return new Response(JSON.stringify({ error: `Missing price env: ${priceEnv}` }), { status: 400 })
 
     const isStripeRecurring = planCode === 'stripe_monthly_auto_990'
+    const sharedMetadata = {
+      owner_id: user.id,
+      plan_code: planCode,
+    }
     const session = await stripe.checkout.sessions.create({
       mode: isStripeRecurring ? 'subscription' : 'payment',
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: successUrl,
       cancel_url: cancelUrl,
       customer_email: user.email,
-      metadata: {
-        owner_id: user.id,
-        plan_code: planCode,
-      },
+      metadata: sharedMetadata,
+      // Pour les abonnements Stripe récurrents, on propage aussi le metadata
+      // vers l'objet Subscription pour retrouver l'owner_id lors des renouvellements.
+      subscription_data: isStripeRecurring
+        ? { metadata: sharedMetadata }
+        : undefined,
+      // Pour les paiements PromptPay (one-shot), on attache le metadata au PaymentIntent.
+      payment_intent_data: !isStripeRecurring
+        ? { metadata: sharedMetadata }
+        : undefined,
       payment_method_types: isStripeRecurring ? ['card'] : ['promptpay', 'card'],
     })
 

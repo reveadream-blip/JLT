@@ -2530,8 +2530,11 @@ export function DashboardShell() {
   const [contractsData, setContractsData] = useState<ContractRow[]>([])
   const [currentSubscription, setCurrentSubscription] = useState<BillingSubscriptionRow | null>(null)
   const [pendingCheckoutCode, setPendingCheckoutCode] = useState('')
-  const [testModeEnabled, setTestModeEnabled] = useState(true)
+  const [testModeEnabled, setTestModeEnabled] = useState(isPublicDemoMode)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [isAnonymousUser, setIsAnonymousUser] = useState<boolean>(false)
+  const [urlSearchParams, setUrlSearchParams] = useSearchParams()
+  const autoCheckoutAttemptedRef = useRef(false)
   const [editModal, setEditModal] = useState<EditModalState | null>(null)
   const [modalVehiclePhoto, setModalVehiclePhoto] = useState<File | null>(null)
   const [modalClientPassportPhoto, setModalClientPassportPhoto] = useState<File | null>(null)
@@ -2554,6 +2557,7 @@ export function DashboardShell() {
     const ownerId = session?.user?.id
     if (!ownerId) return
     setCurrentUserId(ownerId)
+    setIsAnonymousUser(Boolean(session?.user?.is_anonymous))
 
     const [vehiclesRes, clientsRes, contractsRes, revisionsRes, subscriptionRes] = await Promise.all([
       supabase.from('vehicles').select('id,type,brand,model,status,daily_price'),
@@ -2739,8 +2743,29 @@ export function DashboardShell() {
       return
     }
     const stored = localStorage.getItem('jlt-test-mode')
-    if (stored === 'false') setTestModeEnabled(false)
+    if (stored === 'true') setTestModeEnabled(true)
   }, [])
+
+  useEffect(() => {
+    if (autoCheckoutAttemptedRef.current) return
+    if (section !== 'abonnement') return
+    if (!currentUserId) return
+    const planCode = urlSearchParams.get('plan') || ''
+    const knownPlans = new Set([
+      'stripe_monthly_auto_990',
+      'promptpay_monthly_990',
+      'promptpay_yearly_9900',
+    ])
+    if (!knownPlans.has(planCode)) return
+    autoCheckoutAttemptedRef.current = true
+    const nextParams = new URLSearchParams(urlSearchParams)
+    nextParams.delete('plan')
+    setUrlSearchParams(nextParams, { replace: true })
+    void onStartCheckout(planCode)
+    // onStartCheckout is intentionally omitted: it is re-created each render
+    // and we only want this effect to run once per auth/section change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section, currentUserId, isAnonymousUser])
 
   useEffect(() => {
     if (!notificationsOpen) return
@@ -2844,10 +2869,22 @@ export function DashboardShell() {
   }
 
   const onStartCheckout = async (planCode: string) => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    const user = session?.user
+    if (!user || user.is_anonymous) {
+      setLoadError(t('auth').needAccountForBilling)
+      const target =
+        `/inscription?plan=${encodeURIComponent(planCode)}` +
+        `&next=${encodeURIComponent('/app/abonnement')}`
+      window.location.href = target
+      return
+    }
     setPendingCheckoutCode(planCode)
     const payload = {
       planCode,
-      successUrl: `${window.location.origin}/app/abonnement`,
+      successUrl: `${window.location.origin}/app/dashboard`,
       cancelUrl: `${window.location.origin}/app/abonnement`,
       locale,
     }

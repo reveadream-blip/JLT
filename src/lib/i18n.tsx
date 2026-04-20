@@ -112,6 +112,8 @@ export const translations = {
       mfaQrAlt: 'QR code 2FA',
       loading: 'Chargement...',
       backHome: "Retour à l'accueil",
+      needAccountForBilling: "Créez votre compte pour activer votre espace privé.",
+      autoCheckoutPending: 'Préparation de votre paiement...',
     },
     app: {
       menu: ['Dashboard', 'Véhicules', 'Clients', 'Contrats', 'Planning', 'Abonnement'],
@@ -389,6 +391,8 @@ export const translations = {
       mfaQrAlt: '2FA QR code',
       loading: 'Loading...',
       backHome: 'Back to home',
+      needAccountForBilling: 'Create your account to activate your private workspace.',
+      autoCheckoutPending: 'Preparing your checkout...',
     },
     app: {
       menu: ['Dashboard', 'Vehicles', 'Clients', 'Contracts', 'Planning', 'Subscription'],
@@ -662,6 +666,8 @@ export const translations = {
       mfaQrAlt: 'คิวอาร์โค้ด 2FA',
       loading: 'กำลังโหลด...',
       backHome: 'กลับหน้าหลัก',
+      needAccountForBilling: 'สร้างบัญชีของคุณเพื่อเปิดใช้พื้นที่ส่วนตัว',
+      autoCheckoutPending: 'กำลังเตรียมการชำระเงินของคุณ...',
     },
     app: {
       menu: ['แดชบอร์ด', 'ยานพาหนะ', 'ลูกค้า', 'สัญญา', 'ปฏิทิน', 'แพ็กเกจ'],
@@ -937,6 +943,8 @@ export const translations = {
       mfaQrAlt: 'QR-код 2FA',
       loading: 'Загрузка...',
       backHome: 'Назад на главную',
+      needAccountForBilling: 'Создайте аккаунт, чтобы активировать личное пространство.',
+      autoCheckoutPending: 'Подготовка к оплате...',
     },
     app: {
       menu: ['Панель', 'Транспорт', 'Клиенты', 'Договоры', 'Планирование', 'Подписка'],
@@ -1212,6 +1220,8 @@ export const translations = {
       mfaQrAlt: 'Codice QR 2FA',
       loading: 'Caricamento...',
       backHome: 'Torna alla home',
+      needAccountForBilling: 'Crea il tuo account per attivare il tuo spazio privato.',
+      autoCheckoutPending: 'Preparazione del pagamento...',
     },
     app: {
       menu: ['Dashboard', 'Veicoli', 'Clienti', 'Contratti', 'Planning', 'Abbonamento'],
@@ -1489,6 +1499,8 @@ export const translations = {
       mfaQrAlt: '2FA-QR-Code',
       loading: 'Wird geladen...',
       backHome: 'Zurück zur Startseite',
+      needAccountForBilling: 'Erstellen Sie Ihr Konto, um Ihren privaten Bereich zu aktivieren.',
+      autoCheckoutPending: 'Zahlung wird vorbereitet...',
     },
     app: {
       menu: ['Dashboard', 'Fahrzeuge', 'Kunden', 'Verträge', 'Planung', 'Abo'],

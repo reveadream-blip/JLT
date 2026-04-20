@@ -5,6 +5,13 @@ import { supabase } from '../lib/supabase'
 
 type AuthState = 'loading' | 'authenticated' | 'anonymous'
 
+/** En production, un user Supabase anonyme (is_anonymous) est traité comme non connecté. */
+function classify(session: { user?: { is_anonymous?: boolean | null } | null } | null): AuthState {
+  if (!session || !session.user) return 'anonymous'
+  if (session.user.is_anonymous) return 'anonymous'
+  return 'authenticated'
+}
+
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { t } = useI18n()
   const auth = t('auth')
@@ -18,13 +25,13 @@ export function RequireAuth({ children }: { children: ReactNode }) {
         data: { session },
       } = await supabase.auth.getSession()
       if (!mounted) return
-      setAuthState(session ? 'authenticated' : 'anonymous')
+      setAuthState(classify(session))
     }
 
     void checkSession()
 
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthState(session ? 'authenticated' : 'anonymous')
+      setAuthState(classify(session))
     })
 
     return () => {

@@ -70,6 +70,7 @@ export function LandingPage() {
 
   const pricingPlans = [
     {
+      code: 'stripe_monthly_auto_990',
       name: landing.pricingPlanMonthlyName,
       price: landing.pricingPlanMonthlyPrice,
       suffix: landing.pricingPlanMonthlySuffix,
@@ -77,6 +78,7 @@ export function LandingPage() {
       popular: false,
     },
     {
+      code: 'promptpay_monthly_990',
       name: landing.pricingPlanOneMonthName,
       price: landing.pricingPlanOneMonthPrice,
       suffix: landing.pricingPlanOneMonthSuffix,
@@ -84,6 +86,7 @@ export function LandingPage() {
       popular: true,
     },
     {
+      code: 'promptpay_yearly_9900',
       name: landing.pricingPlanYearlyName,
       price: landing.pricingPlanYearlyPrice,
       suffix: landing.pricingPlanYearlySuffix,
@@ -283,7 +286,10 @@ export function LandingPage() {
                     </li>
                   ))}
                 </ul>
-                <Link to="/app/dashboard" className={`pricing-card-cta pricing-card-cta--${plan.variant}`}>
+                <Link
+                  to={`/inscription?plan=${plan.code}&next=${encodeURIComponent('/app/abonnement')}`}
+                  className={`pricing-card-cta pricing-card-cta--${plan.variant}`}
+                >
                   {landing.pricingCta}
                 </Link>
               </article>

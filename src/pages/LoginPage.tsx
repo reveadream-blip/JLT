@@ -1,18 +1,47 @@
-import { useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useMemo, useState } from 'react'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { localeOptions, useI18n, type Locale } from '../lib/i18n'
 import { supabase } from '../lib/supabase'
 import './LoginPage.css'
 
 const STRONG_PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*\d).{8,}$/
+const KNOWN_PLAN_CODES = new Set([
+  'stripe_monthly_auto_990',
+  'promptpay_monthly_990',
+  'promptpay_yearly_9900',
+])
+
+function sanitizeNextPath(raw: string | null): string {
+  if (!raw) return ''
+  if (!raw.startsWith('/') || raw.startsWith('//')) return ''
+  return raw
+}
+
+function sanitizePlanCode(raw: string | null): string {
+  if (!raw) return ''
+  return KNOWN_PLAN_CODES.has(raw) ? raw : ''
+}
 
 export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
+  const [searchParams] = useSearchParams()
   const { locale, setLocale, t } = useI18n()
   const nav = t('nav')
   const authText = t('auth')
   const isSignupPage = location.pathname === '/inscription'
+  const planCode = useMemo(() => sanitizePlanCode(searchParams.get('plan')), [searchParams])
+  const nextPath = useMemo(() => sanitizeNextPath(searchParams.get('next')), [searchParams])
+  const redirectAfterAuth = planCode
+    ? `/app/abonnement?plan=${planCode}`
+    : nextPath || '/app/dashboard'
+  const buildAuthPath = (target: '/connexion' | '/inscription') => {
+    const params = new URLSearchParams()
+    if (planCode) params.set('plan', planCode)
+    if (nextPath) params.set('next', nextPath)
+    const query = params.toString()
+    return query ? `${target}?${query}` : target
+  }
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
@@ -65,12 +94,13 @@ export function LoginPage() {
         setError(authText.errorPasswordTooShort)
         return
       }
+      const loginPath = buildAuthPath('/connexion')
       const { error: signUpError } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: { full_name: fullName },
-          emailRedirectTo: `${window.location.origin}/connexion`,
+          emailRedirectTo: `${window.location.origin}${loginPath}`,
         },
       })
       if (signUpError) {
@@ -82,7 +112,7 @@ export function LoginPage() {
         ) {
           setMessage(authText.signupPending)
           setPassword('')
-          setTimeout(() => navigate('/connexion'), 600)
+          setTimeout(() => navigate(loginPath), 600)
         } else {
           setError(mapSignupError(signUpError.message))
         }
@@ -90,12 +120,31 @@ export function LoginPage() {
         await supabase.auth.signOut()
         setMessage(authText.signupSuccess)
         setPassword('')
-        setTimeout(() => navigate('/connexion'), 600)
+        setTimeout(() => navigate(loginPath), 600)
       }
       setLoading(false)
       return
     }
 
+    // Si un mot de passe est fourni, auth directe (pas de rate limit email).
+    if (password.trim()) {
+      const { error: pwError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
+      if (pwError) {
+        setError(mapAuthError(pwError.message))
+      } else {
+        setMessage(authText.codeVerified)
+        setLoading(false)
+        navigate(redirectAfterAuth)
+        return
+      }
+      setLoading(false)
+      return
+    }
+
+    // Sinon fallback OTP par email (utile si mot de passe oublié).
     const { error: otpError } = await supabase.auth.signInWithOtp({
       email,
       options: {
@@ -134,7 +183,7 @@ export function LoginPage() {
     }
     setMessage(authText.codeVerified)
     setLoading(false)
-    navigate('/app/dashboard')
+    navigate(redirectAfterAuth)
   }
 
   return (
@@ -179,7 +228,11 @@ export function LoginPage() {
         </select>
 
         <button type="button" className="login-submit" onClick={() => void onSubmit()} disabled={loading}>
-          {isSignupPage ? authText.signUp : authText.sendCode}
+          {isSignupPage
+            ? authText.signUp
+            : password.trim()
+              ? authText.signIn
+              : authText.sendCode}
         </button>
 
         {!isSignupPage && codeSent && (
@@ -216,9 +269,9 @@ export function LoginPage() {
 
         <div className="login-footer">
           {!isSignupPage ? (
-            <Link to="/inscription">{authText.signupTab}</Link>
+            <Link to={buildAuthPath('/inscription')}>{authText.signupTab}</Link>
           ) : (
-            <span />
+            <Link to={buildAuthPath('/connexion')}>{authText.loginTab}</Link>
           )}
           <Link to="/">{authText.backHome}</Link>
         </div>
