@@ -27,7 +27,6 @@ import { Link, NavLink, useParams, useSearchParams } from 'react-router-dom'
 import {
   supabase,
   SUPABASE_URL,
-  SUPABASE_ANON_KEY,
   vehiclePhotosBucket,
   parseVehiclePhotoObjectKey,
   vehicleIdFromVehiclePhotoPath,
@@ -2901,6 +2900,11 @@ export function DashboardShell() {
       return
     }
     const endpoint = `${SUPABASE_URL.replace(/\/+$/, '')}/functions/v1/create-checkout-session`
+    // Le projet est migre vers les JWT signing keys (ES256). Le gateway
+    // Supabase a un bug connu (#42244, #42810) ou il rejette le header
+    // `apikey` quand celui-ci est un JWT ES256. On l'omet : la fonction
+    // est deployee avec `verify_jwt = false` et verifie elle-meme le
+    // Bearer via supabaseAdmin.auth.getUser(jwt) qui supporte ES256.
     let response: Response
     try {
       response = await fetch(endpoint, {
@@ -2908,7 +2912,6 @@ export function DashboardShell() {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
-          apikey: SUPABASE_ANON_KEY,
         },
         body: JSON.stringify(payload),
       })
