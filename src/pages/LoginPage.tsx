@@ -96,49 +96,18 @@ export function LoginPage() {
       }
       const loginPath = buildAuthPath('/connexion')
 
-      // Si le visiteur est déjà connecté en anonyme (mode démo), on convertit
-      // son compte anonyme en compte permanent. Son auth.uid() est conservé,
-      // donc toutes les données créées en démo (véhicules, clients, contrats)
-      // sont automatiquement rattachées au nouveau compte.
+      // Si le visiteur est dans une session anonyme (mode démo), on la termine
+      // proprement avant signUp. Raison : supabase.auth.updateUser() sur un
+      // user anonyme envoie un email de type "Change Email Address" avec un
+      // template distinct, souvent non configuré. Le flow signUp reste donc
+      // la voie fiable (même template "Confirm signup" que la prod).
+      // Trade-off assumé : les données créées pendant la démo ne sont pas
+      // migrées vers le nouveau compte — le visiteur repart sur une app vierge.
       const {
         data: { session: currentSession },
       } = await supabase.auth.getSession()
-      const currentUser = currentSession?.user
-      const isAnonymous = Boolean(currentUser?.is_anonymous)
-
-      if (currentUser && isAnonymous) {
-        const { error: updateError } = await supabase.auth.updateUser({
-          email,
-          password,
-          data: { full_name: fullName },
-        })
-        if (updateError) {
-          const normalized = updateError.message.toLowerCase()
-          if (
-            normalized.includes('email rate limit exceeded') ||
-            normalized.includes('rate limit') ||
-            normalized.includes('too many requests')
-          ) {
-            setMessage(authText.signupPending)
-            setPassword('')
-            setTimeout(() => navigate(loginPath), 600)
-          } else {
-            setError(mapSignupError(updateError.message))
-          }
-        } else {
-          // Synchronise le nom sur la ligne profiles existante (créée par
-          // le trigger handle_new_user au moment du signInAnonymously)
-          await supabase
-            .from('profiles')
-            .update({ full_name: fullName })
-            .eq('id', currentUser.id)
-          await supabase.auth.signOut()
-          setMessage(authText.signupSuccess)
-          setPassword('')
-          setTimeout(() => navigate(loginPath), 600)
-        }
-        setLoading(false)
-        return
+      if (currentSession?.user?.is_anonymous) {
+        await supabase.auth.signOut()
       }
 
       const { error: signUpError } = await supabase.auth.signUp({
