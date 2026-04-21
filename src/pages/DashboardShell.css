@@ -1369,6 +1369,197 @@ a.kpi-card--link:focus-visible {
   font-weight: 700;
 }
 
+.airtag-editor .airtag-locate-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.airtag-editor .airtag-locate-btn:hover {
+  background: #2563eb;
+  color: #fff;
+}
+
+.airtag-editor .airtag-locate-btn svg {
+  flex-shrink: 0;
+}
+
+/* ------- Trackers page ------- */
+.trackers-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.trackers-intro {
+  margin: 0;
+  color: #475569;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.trackers-launcher {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.trackers-launcher__btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 18px 20px;
+  border-radius: 14px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #0f172a;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.trackers-launcher__btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+
+.trackers-launcher__btn svg {
+  flex-shrink: 0;
+}
+
+.trackers-launcher__label {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.trackers-launcher__hint {
+  color: #64748b;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.trackers-launcher__btn--apple {
+  border-color: #0f172a;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  color: #f8fafc;
+}
+
+.trackers-launcher__btn--apple .trackers-launcher__hint {
+  color: #cbd5f5;
+}
+
+.trackers-launcher__btn--apple:hover {
+  border-color: #0b1120;
+}
+
+.trackers-launcher__btn--android {
+  border-color: #16a34a;
+  background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+  color: #14532d;
+}
+
+.trackers-launcher__btn--android .trackers-launcher__hint {
+  color: #166534;
+}
+
+.trackers-launcher__btn--android:hover {
+  border-color: #15803d;
+}
+
+.trackers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.trackers-list__title {
+  margin: 0;
+  font-size: 1rem;
+  color: #0f172a;
+}
+
+.trackers-empty {
+  background: #f8fafc;
+}
+
+.trackers-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trackers-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+}
+
+.trackers-item__info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.trackers-item__name {
+  color: #0f172a;
+  font-size: 0.95rem;
+}
+
+.trackers-item__meta {
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.trackers-item__code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  color: #475569;
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 6px;
+  align-self: flex-start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trackers-item__btn {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 640px) {
+  .trackers-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .trackers-item__btn {
+    align-self: stretch;
+    justify-content: center;
+  }
+}
+
 .row-actions {
   margin-top: 6px;
   display: flex;

@@ -17,6 +17,7 @@ import {
   CreditCard,
   LayoutDashboard,
   LogOut,
+  MapPin,
   Plus,
   Search,
   Users,
@@ -45,6 +46,61 @@ const isPublicDemoMode = import.meta.env.VITE_PUBLIC_DEMO_MODE === 'true'
 
 function normalizeVehicleLabel(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/**
+ * Détecte le format du champ tracker :
+ *  - 'url'     : lien http(s) d'un tracker GPS tiers (Invoxia, Tractive, etc.)
+ *  - 'coords'  : coordonnées GPS « lat,lng » (ex. « 7.8804,98.3923 »)
+ *  - 'code'    : code AirTag ou équivalent (Apple-only)
+ */
+function detectTrackerFormat(raw: string): 'empty' | 'url' | 'coords' | 'code' {
+  const trimmed = raw.trim()
+  if (!trimmed) return 'empty'
+  if (/^https?:\/\//i.test(trimmed)) return 'url'
+  const match = trimmed.match(/^(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)$/)
+  if (match) {
+    const lat = Number(match[1])
+    const lng = Number(match[2])
+    if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) return 'coords'
+  }
+  return 'code'
+}
+
+/**
+ * Ouvre la position d'un tracker dans la meilleure app selon le format saisi.
+ * - URL http(s)      -> ouverte telle quelle (tracker GPS tiers, marche partout)
+ * - coords « lat,lng » -> Apple Maps sur iOS, Google Maps sur Android / desktop
+ * - code AirTag      -> app Localiser sur iOS ; message d'info sur Android (Apple-only)
+ */
+function openAirtagLocation(code: string, androidAirtagHelp: string) {
+  if (typeof window === 'undefined') return
+  const trimmed = code.trim()
+  const kind = detectTrackerFormat(trimmed)
+  if (kind === 'empty') return
+
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+  const isIOS = /iPad|iPhone|iPod/.test(ua) &&
+    !(window as unknown as { MSStream?: unknown }).MSStream
+
+  if (kind === 'url') {
+    window.open(trimmed, '_blank', 'noopener,noreferrer')
+    return
+  }
+
+  if (kind === 'coords') {
+    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+      trimmed,
+    )}`
+    window.open(mapsUrl, '_blank', 'noopener,noreferrer')
+    return
+  }
+
+  if (isIOS) {
+    window.location.href = 'findmy://'
+    return
+  }
+  window.alert(androidAirtagHelp)
 }
 
 /** Recherche insensible aux accents (e / é / è…). */
@@ -206,6 +262,7 @@ const menuMeta = [
   { key: 'clients', icon: Users },
   { key: 'contrats', icon: ClipboardList },
   { key: 'planning', icon: Calendar },
+  { key: 'trackers', icon: MapPin },
   { key: 'abonnement', icon: CreditCard },
 ]
 
@@ -1569,6 +1626,18 @@ function VehiculesPage({
             >
               {savingAirtagFor === vehicle.id ? '...' : app.save}
             </button>
+            {vehicle.airtagCode ? (
+              <button
+                type="button"
+                className="airtag-locate-btn"
+                onClick={() => openAirtagLocation(vehicle.airtagCode, app.airtagAndroidHelp)}
+                title={app.airtagLocate}
+                aria-label={app.airtagLocate}
+              >
+                <MapPin size={16} />
+                <span>{app.airtagLocate}</span>
+              </button>
+            ) : null}
           </div>
           <p className="vehicle-price">
             <strong>{vehicle.pricePerDay} ฿</strong> /jour
@@ -2399,6 +2468,114 @@ function AbonnementPage({
   )
 }
 
+function TrackersPage({
+  app,
+  vehiclesData,
+}: {
+  app: any
+  vehiclesData: VehicleRow[]
+}) {
+  const vehicleTypeLabels: Record<VehicleRow['type'], string> = {
+    scooter: app.dashboard.vehicleTypes[0],
+    car: app.dashboard.vehicleTypes[1],
+    bike: app.dashboard.vehicleTypes[2],
+  }
+  const trackers = vehiclesData
+    .filter((vehicle) => (vehicle.airtag_code || '').trim().length > 0)
+    .map((vehicle) => {
+      const code = (vehicle.airtag_code || '').trim()
+      const kind = detectTrackerFormat(code)
+      return { vehicle, code, kind }
+    })
+
+  const formatLabel = (kind: 'url' | 'coords' | 'code' | 'empty') => {
+    if (kind === 'url') return app.trackersFormatUrl
+    if (kind === 'coords') return app.trackersFormatCoords
+    return app.trackersFormatCode
+  }
+
+  return (
+    <div className="trackers-page">
+      <p className="trackers-intro">{app.trackersIntro}</p>
+
+      <div className="trackers-launcher">
+        <button
+          type="button"
+          className="trackers-launcher__btn trackers-launcher__btn--apple"
+          onClick={() => {
+            const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+            const isApple =
+              /iPad|iPhone|iPod/.test(ua) &&
+              !(window as unknown as { MSStream?: unknown }).MSStream
+            if (isApple) {
+              window.location.href = 'findmy://'
+              return
+            }
+            window.open('https://www.icloud.com/find', '_blank', 'noopener,noreferrer')
+          }}
+        >
+          <MapPin size={18} aria-hidden />
+          <span className="trackers-launcher__label">{app.trackersOpenAppleBtn}</span>
+          <small className="trackers-launcher__hint">{app.trackersAppleHint}</small>
+        </button>
+
+        <button
+          type="button"
+          className="trackers-launcher__btn trackers-launcher__btn--android"
+          onClick={() => {
+            window.open('https://www.google.com/android/find', '_blank', 'noopener,noreferrer')
+          }}
+        >
+          <MapPin size={18} aria-hidden />
+          <span className="trackers-launcher__label">{app.trackersOpenAndroidBtn}</span>
+          <small className="trackers-launcher__hint">{app.trackersAndroidHint}</small>
+        </button>
+      </div>
+
+      <section className="trackers-list">
+        <h3 className="trackers-list__title">{app.trackersListTitle}</h3>
+
+        {trackers.length === 0 ? (
+          <article className="list-item trackers-empty">
+            <h4>{app.trackersEmpty}</h4>
+            <p>{app.trackersEmptyHint}</p>
+          </article>
+        ) : (
+          <ul className="trackers-items">
+            {trackers.map(({ vehicle, code, kind }) => (
+              <li key={vehicle.id} className="trackers-item">
+                <div className="trackers-item__info">
+                  <strong className="trackers-item__name">
+                    {vehicle.brand} {vehicle.model}
+                    {vehicle.license_plate ? ` · ${vehicle.license_plate}` : ''}
+                  </strong>
+                  <span className="trackers-item__meta">
+                    {vehicleTypeLabels[vehicle.type]}
+                    {vehicle.year ? ` · ${vehicle.year}` : ''}
+                    {' · '}
+                    {formatLabel(kind)}
+                  </span>
+                  <code className="trackers-item__code">{code}</code>
+                </div>
+                <button
+                  type="button"
+                  className="airtag-locate-btn trackers-item__btn"
+                  onClick={() => openAirtagLocation(code, app.airtagAndroidHelp)}
+                  title={app.airtagLocate}
+                  aria-label={app.airtagLocate}
+                >
+                  <MapPin size={16} />
+                  <span>{app.airtagLocate}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  )
+}
+
 function renderSection(
   section: string,
   app: any,
@@ -2490,6 +2667,8 @@ function renderSection(
           onDeleteContract={onDeleteContract}
         />
       )
+    case 'trackers':
+      return <TrackersPage app={app} vehiclesData={vehiclesData} />
     case 'abonnement':
       return (
         <AbonnementPage
@@ -3522,7 +3701,8 @@ export function DashboardShell() {
     clients: `${clientsData.length} ${d.registered}`,
     contrats: `${contractsData.length} ${app.subtitles[3]?.replace(/^.*?(\d+\s+)/, '') || ''}`.trim(),
     planning: app.subtitles[4] || '',
-    abonnement: app.subtitles[5] || '',
+    trackers: app.subtitles[5] || '',
+    abonnement: app.subtitles[6] || '',
   }
   const sectionSubtitle = sectionSubtitleMap[section] || app.subtitles[currentIndex] || app.subtitles[0]
   const isSubscriptionActive =
@@ -3750,7 +3930,7 @@ export function DashboardShell() {
                 <LogOut size={14} />
                 {t('auth').signOut}
               </button>
-            ) : (
+            ) : section === 'trackers' ? null : (
               <button type="button" className="accent-btn top-actions__primary" onClick={onOpenCreateModal}>
                 <Plus size={14} />
                 {primaryActionLabel}
@@ -3759,7 +3939,7 @@ export function DashboardShell() {
           </div>
         </header>
 
-        {section !== 'abonnement' && (
+        {section !== 'abonnement' && section !== 'trackers' && (
           <div className="toolbar">
             <div className="search-box">
               <Search size={14} />
@@ -3806,7 +3986,7 @@ export function DashboardShell() {
               <h4>{app.billingLockedTitle}</h4>
               <p>{app.billingLockedDesc}</p>
               <Link to="/app/abonnement" className="see-all-link">
-                {app.menu[5]}
+                {app.menu[6]}
               </Link>
             </article>
           ) : (
