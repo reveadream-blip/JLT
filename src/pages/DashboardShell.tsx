@@ -38,6 +38,7 @@ import {
 } from '../lib/supabase'
 import './DashboardShell.css'
 import { LocalizedDatePicker } from '../components/LocalizedDatePicker'
+import { InstallPWAButton } from '../components/InstallPWAButton'
 
 /** Démo publique : connexion anonyme + accès sans abonnement (voir VITE_PUBLIC_DEMO_MODE). */
 const isPublicDemoMode = import.meta.env.VITE_PUBLIC_DEMO_MODE === 'true'
@@ -3584,6 +3585,7 @@ export function DashboardShell() {
               {app.menu[index]}
             </NavLink>
           ))}
+          <InstallPWAButton variant="sidebar" />
         </nav>
 
         <div className="sidebar-footer">
@@ -4348,6 +4350,7 @@ export function DashboardShell() {
             <span>{app.menu[index]}</span>
           </NavLink>
         ))}
+        <InstallPWAButton variant="bottom-nav" />
       </nav>
     </div>
   )

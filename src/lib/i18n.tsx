@@ -128,6 +128,12 @@ export const translations = {
       done: 'Terminé',
       draft: 'Brouillon',
       backSite: 'Retour site',
+      installApp: "Installer l'application",
+      installAppTitle: "Installer l'application",
+      installAppHint:
+        "Ouvre le menu de ton navigateur (⋮ ou ⋯) et choisis « Installer l'application » ou « Ajouter à l'écran d'accueil ». L'app s'ouvrira ensuite comme une vraie application, sans barre d'adresse.",
+      installAppHintIos:
+        "Sur iPhone / iPad :\n1. Appuie sur le bouton Partager (l'icône avec une flèche) en bas de Safari.\n2. Fais défiler puis choisis « Sur l'écran d'accueil ».\n3. Appuie sur « Ajouter » en haut à droite.",
       rateLabels: ['Par jour', 'Par semaine', 'Par mois'],
       perMonth: '/ mois',
       vehiclePhotoCta: 'Prendre / ajouter une photo',
@@ -407,6 +413,12 @@ export const translations = {
       done: 'Completed',
       draft: 'Draft',
       backSite: 'Back to site',
+      installApp: 'Install app',
+      installAppTitle: 'Install the app',
+      installAppHint:
+        'Open your browser menu (⋮ or ⋯) and choose "Install app" or "Add to home screen". The app will then open like a real app, without the address bar.',
+      installAppHintIos:
+        'On iPhone / iPad:\n1. Tap the Share button (arrow icon) at the bottom of Safari.\n2. Scroll down and choose "Add to Home Screen".\n3. Tap "Add" in the top right.',
       rateLabels: ['Per day', 'Per week', 'Per month'],
       perMonth: '/ month',
       vehiclePhotoCta: 'Take / upload a photo',
@@ -682,6 +694,12 @@ export const translations = {
       done: 'เสร็จสิ้น',
       draft: 'ฉบับร่าง',
       backSite: 'กลับสู่เว็บไซต์',
+      installApp: 'ติดตั้งแอป',
+      installAppTitle: 'ติดตั้งแอปพลิเคชัน',
+      installAppHint:
+        'เปิดเมนูเบราว์เซอร์ (⋮ หรือ ⋯) แล้วเลือก "ติดตั้งแอป" หรือ "เพิ่มไปยังหน้าจอหลัก" แอปจะเปิดเหมือนแอปจริง โดยไม่มีแถบที่อยู่',
+      installAppHintIos:
+        'บน iPhone / iPad:\n1. แตะปุ่มแชร์ (ไอคอนลูกศร) ที่ด้านล่างของ Safari\n2. เลื่อนลงแล้วเลือก "เพิ่มไปยังหน้าจอหลัก"\n3. แตะ "เพิ่ม" ที่มุมขวาบน',
       rateLabels: ['ต่อวัน', 'ต่อสัปดาห์', 'ต่อเดือน'],
       perMonth: '/ เดือน',
       vehiclePhotoCta: 'ถ่าย / อัปโหลดรูป',
@@ -959,6 +977,12 @@ export const translations = {
       done: 'Завершено',
       draft: 'Черновик',
       backSite: 'Назад на сайт',
+      installApp: 'Установить',
+      installAppTitle: 'Установить приложение',
+      installAppHint:
+        'Откройте меню браузера (⋮ или ⋯) и выберите «Установить приложение» или «Добавить на главный экран». Приложение будет открываться как настоящее приложение, без адресной строки.',
+      installAppHintIos:
+        'На iPhone / iPad:\n1. Нажмите кнопку «Поделиться» (иконка со стрелкой) внизу Safari.\n2. Прокрутите вниз и выберите «На экран «Домой»».\n3. Нажмите «Добавить» в правом верхнем углу.',
       rateLabels: ['В день', 'В неделю', 'В месяц'],
       perMonth: '/ месяц',
       vehiclePhotoCta: 'Сделать / загрузить фото',
@@ -1236,6 +1260,12 @@ export const translations = {
       done: 'Completato',
       draft: 'Bozza',
       backSite: 'Torna al sito',
+      installApp: "Installa l'app",
+      installAppTitle: "Installa l'applicazione",
+      installAppHint:
+        'Apri il menu del browser (⋮ o ⋯) e scegli "Installa app" o "Aggiungi a schermata Home". L\'app si aprirà come una vera applicazione, senza barra degli indirizzi.',
+      installAppHintIos:
+        'Su iPhone / iPad:\n1. Tocca il pulsante Condividi (icona freccia) in fondo a Safari.\n2. Scorri e scegli "Aggiungi a schermata Home".\n3. Tocca "Aggiungi" in alto a destra.',
       rateLabels: ['Al giorno', 'A settimana', 'Al mese'],
       perMonth: '/ mese',
       vehiclePhotoCta: 'Scatta / carica una foto',
@@ -1515,6 +1545,12 @@ export const translations = {
       done: 'Abgeschlossen',
       draft: 'Entwurf',
       backSite: 'Zur Website',
+      installApp: 'App installieren',
+      installAppTitle: 'Anwendung installieren',
+      installAppHint:
+        'Öffnen Sie das Browsermenü (⋮ oder ⋯) und wählen Sie „App installieren" oder „Zum Startbildschirm hinzufügen". Die App öffnet sich dann wie eine echte Anwendung, ohne Adressleiste.',
+      installAppHintIos:
+        'Auf iPhone / iPad:\n1. Tippen Sie auf die Teilen-Schaltfläche (Pfeilsymbol) am unteren Rand von Safari.\n2. Scrollen Sie nach unten und wählen Sie „Zum Home-Bildschirm".\n3. Tippen Sie oben rechts auf „Hinzufügen".',
       rateLabels: ['Pro Tag', 'Pro Woche', 'Pro Monat'],
       perMonth: '/ Monat',
       vehiclePhotoCta: 'Foto aufnehmen / hochladen',
