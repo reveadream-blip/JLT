@@ -25,7 +25,7 @@ import {
 } from 'lucide-react'
 import { jsPDF } from 'jspdf'
 import { localeOptions, useI18n } from '../lib/i18n'
-import { Link, NavLink, useParams, useSearchParams } from 'react-router-dom'
+import { Link, NavLink, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   supabase,
   SUPABASE_URL,
@@ -2521,6 +2521,7 @@ export function DashboardShell() {
   const app = t('app')
   const d = app.dashboard
   const { section = 'dashboard' } = useParams()
+  const navigate = useNavigate()
   const [selectedType, setSelectedType] = useState<VehicleTypeFilter>('all')
   const [selectedStatus, setSelectedStatus] = useState<StatusFilter>('all')
   const [searchQuery, setSearchQuery] = useState('')
@@ -2533,8 +2534,9 @@ export function DashboardShell() {
   const [clientsData, setClientsData] = useState<ClientRow[]>([])
   const [contractsData, setContractsData] = useState<ContractRow[]>([])
   const [currentSubscription, setCurrentSubscription] = useState<BillingSubscriptionRow | null>(null)
+  const [subscriptionLoaded, setSubscriptionLoaded] = useState(false)
   const [pendingCheckoutCode, setPendingCheckoutCode] = useState('')
-  const [testModeEnabled, setTestModeEnabled] = useState(isPublicDemoMode)
+  const [testModeEnabled, setTestModeEnabled] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [isAnonymousUser, setIsAnonymousUser] = useState<boolean>(false)
   const [urlSearchParams, setUrlSearchParams] = useSearchParams()
@@ -2595,6 +2597,7 @@ export function DashboardShell() {
     } else {
       setCurrentSubscription(null)
     }
+    setSubscriptionLoaded(true)
     const isMissingBillingTableError =
       !!subscriptionRes.error &&
       (subscriptionRes.error.message.toLowerCase().includes('does not exist') ||
@@ -2621,10 +2624,15 @@ export function DashboardShell() {
         data: { session },
       } = await supabase.auth.getSession()
       if (!cancelled && !session?.user && isPublicDemoMode) {
-        const { error: anonError } = await supabase.auth.signInAnonymously()
+        const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously()
         if (anonError && !cancelled) {
           setLoadError(anonError.message)
           return
+        }
+        if (!cancelled && anonData?.user) {
+          // Pré-remplissage des données démo (idempotent côté SQL)
+          const { error: seedError } = await supabase.rpc('seed_demo_data_if_empty')
+          if (seedError) console.warn('[demo-seed]', seedError.message)
         }
       }
       if (!cancelled) await refreshAppData()
@@ -2742,13 +2750,32 @@ export function DashboardShell() {
   }, [editModal?.kind, editModal?.mode, editModal?.id, editModal?.values?.passport_photo_path])
 
   useEffect(() => {
-    if (isPublicDemoMode) {
+    // Démo publique : uniquement pour les sessions anonymes (visiteurs démo).
+    // Les utilisateurs authentifiés passent par le paywall normal.
+    if (isPublicDemoMode && isAnonymousUser) {
       setTestModeEnabled(true)
       return
     }
+    if (!currentUserId) return
+    // Session authentifiée (non anonyme) : on force le mode test à false
+    // pour que hasAccess dépende uniquement de l'abonnement.
+    setTestModeEnabled(false)
+    // Backdoor QA locale (jamais activée automatiquement en prod)
     const stored = localStorage.getItem('jlt-test-mode')
     if (stored === 'true') setTestModeEnabled(true)
-  }, [])
+  }, [isAnonymousUser, currentUserId])
+
+  // Auto-redirection : utilisateur authentifié sans abonnement actif → page Abonnement
+  useEffect(() => {
+    if (!currentUserId) return
+    if (isAnonymousUser) return
+    if (!subscriptionLoaded) return
+    if (section === 'abonnement') return
+    const hasActiveSub =
+      !!currentSubscription && new Date(currentSubscription.current_period_end).getTime() > Date.now()
+    if (hasActiveSub) return
+    navigate('/app/abonnement', { replace: true })
+  }, [currentUserId, isAnonymousUser, subscriptionLoaded, currentSubscription, section, navigate])
 
   useEffect(() => {
     if (autoCheckoutAttemptedRef.current) return
@@ -3608,7 +3635,7 @@ export function DashboardShell() {
       </aside>
 
       <section className="dashboard-main">
-        {isPublicDemoMode && (
+        {isPublicDemoMode && isAnonymousUser && (
           <div
             className="demo-mode-banner"
             role="status"
