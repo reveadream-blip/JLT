@@ -48,61 +48,6 @@ function normalizeVehicleLabel(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
-/**
- * Détecte le format du champ tracker :
- *  - 'url'     : lien http(s) d'un tracker GPS tiers (Invoxia, Tractive, etc.)
- *  - 'coords'  : coordonnées GPS « lat,lng » (ex. « 7.8804,98.3923 »)
- *  - 'code'    : code AirTag ou équivalent (Apple-only)
- */
-function detectTrackerFormat(raw: string): 'empty' | 'url' | 'coords' | 'code' {
-  const trimmed = raw.trim()
-  if (!trimmed) return 'empty'
-  if (/^https?:\/\//i.test(trimmed)) return 'url'
-  const match = trimmed.match(/^(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)$/)
-  if (match) {
-    const lat = Number(match[1])
-    const lng = Number(match[2])
-    if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) return 'coords'
-  }
-  return 'code'
-}
-
-/**
- * Ouvre la position d'un tracker dans la meilleure app selon le format saisi.
- * - URL http(s)      -> ouverte telle quelle (tracker GPS tiers, marche partout)
- * - coords « lat,lng » -> Apple Maps sur iOS, Google Maps sur Android / desktop
- * - code AirTag      -> app Localiser sur iOS ; message d'info sur Android (Apple-only)
- */
-function openAirtagLocation(code: string, androidAirtagHelp: string) {
-  if (typeof window === 'undefined') return
-  const trimmed = code.trim()
-  const kind = detectTrackerFormat(trimmed)
-  if (kind === 'empty') return
-
-  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
-  const isIOS = /iPad|iPhone|iPod/.test(ua) &&
-    !(window as unknown as { MSStream?: unknown }).MSStream
-
-  if (kind === 'url') {
-    window.open(trimmed, '_blank', 'noopener,noreferrer')
-    return
-  }
-
-  if (kind === 'coords') {
-    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-      trimmed,
-    )}`
-    window.open(mapsUrl, '_blank', 'noopener,noreferrer')
-    return
-  }
-
-  if (isIOS) {
-    window.location.href = 'findmy://'
-    return
-  }
-  window.alert(androidAirtagHelp)
-}
-
 /** Recherche insensible aux accents (e / é / è…). */
 function foldSearchText(value: string): string {
   return value
@@ -277,7 +222,6 @@ type VehicleRow = {
   daily_price: number
   year?: number | null
   license_plate?: string | null
-  airtag_code?: string | null
 }
 type ClientRow = {
   id: string
@@ -1096,8 +1040,6 @@ function VehiculesPage({
     Record<string, Array<{ id: string; filePath: string; signedUrl: string }>>
   >({})
   const [uploadingFor, setUploadingFor] = useState<string | null>(null)
-  const [airtagDrafts, setAirtagDrafts] = useState<Record<string, string>>({})
-  const [savingAirtagFor, setSavingAirtagFor] = useState<string | null>(null)
   const [feedback, setFeedback] = useState('')
   const [error, setError] = useState('')
   const [vehicleTab, setVehicleTab] = useState<'fleet' | 'revisions'>('fleet')
@@ -1180,7 +1122,6 @@ function VehiculesPage({
       vehicle.year ? String(vehicle.year) : '—',
       vehicle.type === 'car' ? 'Auto' : vehicle.type === 'bike' ? 'Velo' : 'Scooter',
     ],
-    airtagCode: vehicle.airtag_code || '',
   }))
   const filteredVehicles = vehicles.filter((vehicle) => {
     const typeOk = selectedType === 'all' || vehicle.type === selectedType
@@ -1326,31 +1267,6 @@ function VehiculesPage({
 
     void loadPhotos()
   }, [sessionUserId, vehiclesData, revokeVehiclePhotoBlobs])
-
-  useEffect(() => {
-    const nextDrafts: Record<string, string> = {}
-    vehicles.forEach((vehicle) => {
-      nextDrafts[vehicle.id] = vehicle.airtagCode
-    })
-    setAirtagDrafts(nextDrafts)
-  }, [vehiclesData])
-
-  const onSaveAirtag = async (vehicleId: string) => {
-    setFeedback('')
-    setError('')
-    setSavingAirtagFor(vehicleId)
-    const code = (airtagDrafts[vehicleId] || '').trim()
-    const { error: updateError } = await supabase
-      .from('vehicles')
-      .update({ airtag_code: code || null })
-      .eq('id', vehicleId)
-    if (updateError) {
-      setError(updateError.message)
-    } else {
-      setFeedback(app.airtagSaved)
-    }
-    setSavingAirtagFor(null)
-  }
 
   const onVehiclePhotoChange =
     (vehicleId: string, vehicleName: string) => async (event: ChangeEvent<HTMLInputElement>) => {
@@ -1610,34 +1526,6 @@ function VehiculesPage({
             {vehicle.specs.map((spec, index) => (
               <span key={`${vehicle.id}-spec-${index}`}>{spec}</span>
             ))}
-          </div>
-          <div className="airtag-editor">
-            <input
-              value={airtagDrafts[vehicle.id] ?? ''}
-              onChange={(event) =>
-                setAirtagDrafts((prev) => ({ ...prev, [vehicle.id]: event.target.value }))
-              }
-              placeholder={app.airtagPlaceholder}
-            />
-            <button
-              type="button"
-              onClick={() => void onSaveAirtag(vehicle.id)}
-              disabled={savingAirtagFor === vehicle.id}
-            >
-              {savingAirtagFor === vehicle.id ? '...' : app.save}
-            </button>
-            {vehicle.airtagCode ? (
-              <button
-                type="button"
-                className="airtag-locate-btn"
-                onClick={() => openAirtagLocation(vehicle.airtagCode, app.airtagAndroidHelp)}
-                title={app.airtagLocate}
-                aria-label={app.airtagLocate}
-              >
-                <MapPin size={16} />
-                <span>{app.airtagLocate}</span>
-              </button>
-            ) : null}
           </div>
           <p className="vehicle-price">
             <strong>{vehicle.pricePerDay} ฿</strong> /jour
@@ -2468,32 +2356,7 @@ function AbonnementPage({
   )
 }
 
-function TrackersPage({
-  app,
-  vehiclesData,
-}: {
-  app: any
-  vehiclesData: VehicleRow[]
-}) {
-  const vehicleTypeLabels: Record<VehicleRow['type'], string> = {
-    scooter: app.dashboard.vehicleTypes[0],
-    car: app.dashboard.vehicleTypes[1],
-    bike: app.dashboard.vehicleTypes[2],
-  }
-  const trackers = vehiclesData
-    .filter((vehicle) => (vehicle.airtag_code || '').trim().length > 0)
-    .map((vehicle) => {
-      const code = (vehicle.airtag_code || '').trim()
-      const kind = detectTrackerFormat(code)
-      return { vehicle, code, kind }
-    })
-
-  const formatLabel = (kind: 'url' | 'coords' | 'code' | 'empty') => {
-    if (kind === 'url') return app.trackersFormatUrl
-    if (kind === 'coords') return app.trackersFormatCoords
-    return app.trackersFormatCode
-  }
-
+function TrackersPage({ app }: { app: any }) {
   return (
     <div className="trackers-page">
       <p className="trackers-intro">{app.trackersIntro}</p>
@@ -2531,47 +2394,6 @@ function TrackersPage({
           <small className="trackers-launcher__hint">{app.trackersAndroidHint}</small>
         </button>
       </div>
-
-      <section className="trackers-list">
-        <h3 className="trackers-list__title">{app.trackersListTitle}</h3>
-
-        {trackers.length === 0 ? (
-          <article className="list-item trackers-empty">
-            <h4>{app.trackersEmpty}</h4>
-            <p>{app.trackersEmptyHint}</p>
-          </article>
-        ) : (
-          <ul className="trackers-items">
-            {trackers.map(({ vehicle, code, kind }) => (
-              <li key={vehicle.id} className="trackers-item">
-                <div className="trackers-item__info">
-                  <strong className="trackers-item__name">
-                    {vehicle.brand} {vehicle.model}
-                    {vehicle.license_plate ? ` · ${vehicle.license_plate}` : ''}
-                  </strong>
-                  <span className="trackers-item__meta">
-                    {vehicleTypeLabels[vehicle.type]}
-                    {vehicle.year ? ` · ${vehicle.year}` : ''}
-                    {' · '}
-                    {formatLabel(kind)}
-                  </span>
-                  <code className="trackers-item__code">{code}</code>
-                </div>
-                <button
-                  type="button"
-                  className="airtag-locate-btn trackers-item__btn"
-                  onClick={() => openAirtagLocation(code, app.airtagAndroidHelp)}
-                  title={app.airtagLocate}
-                  aria-label={app.airtagLocate}
-                >
-                  <MapPin size={16} />
-                  <span>{app.airtagLocate}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
     </div>
   )
 }
@@ -2668,7 +2490,7 @@ function renderSection(
         />
       )
     case 'trackers':
-      return <TrackersPage app={app} vehiclesData={vehiclesData} />
+      return <TrackersPage app={app} />
     case 'abonnement':
       return (
         <AbonnementPage

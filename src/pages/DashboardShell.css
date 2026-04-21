@@ -1322,73 +1322,6 @@ a.kpi-card--link:focus-visible {
   padding: 3px 8px;
 }
 
-.airtag-editor {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
-  min-width: 0;
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-.airtag-editor input {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 6px 8px;
-  font-size: 0.72rem;
-  color: #1f2937;
-  background: #fff;
-  -webkit-appearance: none;
-  appearance: none;
-  box-shadow: none;
-  outline: none;
-}
-
-.airtag-editor input::placeholder {
-  color: #9ca3af;
-  opacity: 1;
-}
-
-.airtag-editor input:focus {
-  outline: none;
-  border-color: #e5e7eb;
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.22);
-}
-
-.airtag-editor button {
-  border: 1px solid #f59e0b;
-  background: #fff7ed;
-  color: #b45309;
-  border-radius: 8px;
-  padding: 6px 9px;
-  font-size: 0.7rem;
-  font-weight: 700;
-}
-
-.airtag-editor .airtag-locate-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border-color: #2563eb;
-  background: #eff6ff;
-  color: #1d4ed8;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.airtag-editor .airtag-locate-btn:hover {
-  background: #2563eb;
-  color: #fff;
-}
-
-.airtag-editor .airtag-locate-btn svg {
-  flex-shrink: 0;
-}
-
 /* ------- Trackers page ------- */
 .trackers-page {
   display: flex;
@@ -1472,92 +1405,6 @@ a.kpi-card--link:focus-visible {
 
 .trackers-launcher__btn--android:hover {
   border-color: #15803d;
-}
-
-.trackers-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.trackers-list__title {
-  margin: 0;
-  font-size: 1rem;
-  color: #0f172a;
-}
-
-.trackers-empty {
-  background: #f8fafc;
-}
-
-.trackers-items {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.trackers-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
-  background: #fff;
-}
-
-.trackers-item__info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  flex: 1;
-}
-
-.trackers-item__name {
-  color: #0f172a;
-  font-size: 0.95rem;
-}
-
-.trackers-item__meta {
-  color: #64748b;
-  font-size: 0.78rem;
-}
-
-.trackers-item__code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.78rem;
-  color: #475569;
-  background: #f1f5f9;
-  padding: 2px 6px;
-  border-radius: 6px;
-  align-self: flex-start;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.trackers-item__btn {
-  flex-shrink: 0;
-  padding: 8px 12px;
-  border-radius: 10px;
-  font-size: 0.85rem;
-}
-
-@media (max-width: 640px) {
-  .trackers-item {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .trackers-item__btn {
-    align-self: stretch;
-    justify-content: center;
-  }
 }
 
 .row-actions {
@@ -2514,15 +2361,6 @@ a.invoice-preview-download {
     padding-left: 8px;
     padding-right: 8px;
     font-size: 0.72rem;
-  }
-
-  .airtag-editor {
-    flex-direction: column;
-  }
-
-  .airtag-editor button {
-    width: 100%;
-    min-height: 40px;
   }
 
   .vehicle-specs span {
