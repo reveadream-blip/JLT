@@ -21,7 +21,7 @@ export default defineConfig({
       display_override: ['standalone', 'minimal-ui', 'browser'],
       orientation: 'any',
       scope: '/',
-      start_url: '/',
+      start_url: '/app/dashboard',
       id: '/',
       lang: 'fr',
       categories: ['business', 'productivity'],
